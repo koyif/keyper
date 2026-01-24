@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package keyper.api.v1;
+
+option go_package = "github.com/koy/keyper/pkg/api/proto;proto";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+import "models.proto";
+
+// SyncService handles synchronization between client and server
+service SyncService {
+  // Pull retrieves changes from the server since last sync
+  rpc Pull(PullRequest) returns (PullResponse) {
+    option (google.api.http) = {
+      post: "/v1/sync/pull"
+      body: "*"
+    };
+  }
+
+  // Push sends local changes to the server
+  rpc Push(PushRequest) returns (PushResponse) {
+    option (google.api.http) = {
+      post: "/v1/sync/push"
+      body: "*"
+    };
+  }
+
+  // GetSyncStatus retrieves current sync status
+  rpc GetSyncStatus(GetSyncStatusRequest) returns (GetSyncStatusResponse) {
+    option (google.api.http) = {
+      get: "/v1/sync/status"
+    };
+  }
+}
+
+// PullRequest requests changes since a specific version
+message PullRequest {
+  int64 last_sync_version = 1;  // Last known version on client
+  google.protobuf.Timestamp last_sync_time = 2;
+}
+
+// PullResponse contains changes from the server
+message PullResponse {
+  repeated Secret secrets = 1;  // All changed/new secrets
+  repeated string deleted_secret_ids = 2;  // IDs of deleted secrets
+  int64 current_version = 3;  // Server's current version
+  google.protobuf.Timestamp sync_time = 4;
+  bool has_conflicts = 5;
+  repeated Conflict conflicts = 6;
+}
+
+// PushRequest sends local changes to server
+message PushRequest {
+  repeated Secret secrets = 1;  // New or modified secrets
+  repeated string deleted_secret_ids = 2;  // IDs to delete
+  int64 base_version = 3;  // Version client is based on
+}
+
+// PushResponse confirms changes accepted by server
+message PushResponse {
+  int64 new_version = 1;  // New version after push
+  google.protobuf.Timestamp sync_time = 2;
+  repeated string accepted_secret_ids = 3;
+  repeated Conflict conflicts = 4;
+  string message = 5;
+}
+
+// GetSyncStatusRequest requests current sync status
+message GetSyncStatusRequest {
+  // Empty - uses authenticated user context
+}
+
+// GetSyncStatusResponse contains sync metadata
+message GetSyncStatusResponse {
+  int64 server_version = 1;
+  google.protobuf.Timestamp last_sync_time = 2;
+  int32 total_secrets = 3;
+  int32 pending_changes = 4;
+}
+
+// Conflict represents a sync conflict
+message Conflict {
+  string secret_id = 1;
+  ConflictType type = 2;
+  Secret server_version = 3;
+  Secret client_version = 4;
+  string description = 5;
+}
+
+// ConflictType defines the type of sync conflict
+enum ConflictType {
+  CONFLICT_TYPE_UNSPECIFIED = 0;
+  CONFLICT_TYPE_MODIFIED_MODIFIED = 1;  // Both client and server modified
+  CONFLICT_TYPE_MODIFIED_DELETED = 2;   // Client modified, server deleted
+  CONFLICT_TYPE_DELETED_MODIFIED = 3;   // Client deleted, server modified
+  CONFLICT_TYPE_VERSION_MISMATCH = 4;   // Version tracking mismatch
+}

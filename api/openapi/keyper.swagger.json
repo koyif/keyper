@@ -1,0 +1,392 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "sync.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "SyncService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/sync/pull": {
+      "post": {
+        "summary": "Pull retrieves changes from the server since last sync",
+        "operationId": "SyncService_Pull",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PullResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1PullRequest"
+            }
+          }
+        ],
+        "tags": [
+          "SyncService"
+        ]
+      }
+    },
+    "/v1/sync/push": {
+      "post": {
+        "summary": "Push sends local changes to the server",
+        "operationId": "SyncService_Push",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1PushResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1PushRequest"
+            }
+          }
+        ],
+        "tags": [
+          "SyncService"
+        ]
+      }
+    },
+    "/v1/sync/status": {
+      "get": {
+        "summary": "GetSyncStatus retrieves current sync status",
+        "operationId": "SyncService_GetSyncStatus",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetSyncStatusResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "SyncService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1Conflict": {
+      "type": "object",
+      "properties": {
+        "secretId": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/v1ConflictType"
+        },
+        "serverVersion": {
+          "$ref": "#/definitions/v1Secret"
+        },
+        "clientVersion": {
+          "$ref": "#/definitions/v1Secret"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "title": "Conflict represents a sync conflict"
+    },
+    "v1ConflictType": {
+      "type": "string",
+      "enum": [
+        "CONFLICT_TYPE_UNSPECIFIED",
+        "CONFLICT_TYPE_MODIFIED_MODIFIED",
+        "CONFLICT_TYPE_MODIFIED_DELETED",
+        "CONFLICT_TYPE_DELETED_MODIFIED",
+        "CONFLICT_TYPE_VERSION_MISMATCH"
+      ],
+      "default": "CONFLICT_TYPE_UNSPECIFIED",
+      "description": "- CONFLICT_TYPE_MODIFIED_MODIFIED: Both client and server modified\n - CONFLICT_TYPE_MODIFIED_DELETED: Client modified, server deleted\n - CONFLICT_TYPE_DELETED_MODIFIED: Client deleted, server modified\n - CONFLICT_TYPE_VERSION_MISMATCH: Version tracking mismatch",
+      "title": "ConflictType defines the type of sync conflict"
+    },
+    "v1GetSyncStatusResponse": {
+      "type": "object",
+      "properties": {
+        "serverVersion": {
+          "type": "string",
+          "format": "int64"
+        },
+        "lastSyncTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "totalSecrets": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "pendingChanges": {
+          "type": "integer",
+          "format": "int32"
+        }
+      },
+      "title": "GetSyncStatusResponse contains sync metadata"
+    },
+    "v1Metadata": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "isFavorite": {
+          "type": "boolean"
+        },
+        "customFields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "title": "Metadata contains additional information about a secret"
+    },
+    "v1PullRequest": {
+      "type": "object",
+      "properties": {
+        "lastSyncVersion": {
+          "type": "string",
+          "format": "int64",
+          "title": "Last known version on client"
+        },
+        "lastSyncTime": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "title": "PullRequest requests changes since a specific version"
+    },
+    "v1PullResponse": {
+      "type": "object",
+      "properties": {
+        "secrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Secret"
+          },
+          "title": "All changed/new secrets"
+        },
+        "deletedSecretIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "IDs of deleted secrets"
+        },
+        "currentVersion": {
+          "type": "string",
+          "format": "int64",
+          "title": "Server's current version"
+        },
+        "syncTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "hasConflicts": {
+          "type": "boolean"
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Conflict"
+          }
+        }
+      },
+      "title": "PullResponse contains changes from the server"
+    },
+    "v1PushRequest": {
+      "type": "object",
+      "properties": {
+        "secrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Secret"
+          },
+          "title": "New or modified secrets"
+        },
+        "deletedSecretIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "IDs to delete"
+        },
+        "baseVersion": {
+          "type": "string",
+          "format": "int64",
+          "title": "Version client is based on"
+        }
+      },
+      "title": "PushRequest sends local changes to server"
+    },
+    "v1PushResponse": {
+      "type": "object",
+      "properties": {
+        "newVersion": {
+          "type": "string",
+          "format": "int64",
+          "title": "New version after push"
+        },
+        "syncTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "acceptedSecretIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Conflict"
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "title": "PushResponse confirms changes accepted by server"
+    },
+    "v1Secret": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/v1SecretType"
+        },
+        "title": {
+          "type": "string"
+        },
+        "encryptedData": {
+          "type": "string",
+          "title": "Base64-encoded encrypted payload"
+        },
+        "metadata": {
+          "$ref": "#/definitions/v1Metadata"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "version": {
+          "type": "string",
+          "format": "int64",
+          "title": "For conflict resolution"
+        },
+        "isDeleted": {
+          "type": "boolean",
+          "title": "Soft delete flag for sync"
+        }
+      },
+      "title": "Secret represents an encrypted secret entry"
+    },
+    "v1SecretType": {
+      "type": "string",
+      "enum": [
+        "SECRET_TYPE_UNSPECIFIED",
+        "SECRET_TYPE_CREDENTIAL",
+        "SECRET_TYPE_TEXT",
+        "SECRET_TYPE_BINARY",
+        "SECRET_TYPE_BANK_CARD"
+      ],
+      "default": "SECRET_TYPE_UNSPECIFIED",
+      "description": "- SECRET_TYPE_CREDENTIAL: Username/password pair\n - SECRET_TYPE_TEXT: Plain text note\n - SECRET_TYPE_BINARY: Binary data (files, images, etc.)\n - SECRET_TYPE_BANK_CARD: Credit/debit card information",
+      "title": "SecretType defines the type of secret being stored"
+    }
+  }
+}

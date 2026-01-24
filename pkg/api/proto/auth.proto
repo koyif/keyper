@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package keyper.api.v1;
+
+option go_package = "github.com/koy/keyper/pkg/api/proto;proto";
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+// AuthService handles user authentication and session management
+service AuthService {
+  // Register creates a new user account
+  rpc Register(RegisterRequest) returns (RegisterResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/register"
+      body: "*"
+    };
+  }
+
+  // Login authenticates a user and returns access/refresh tokens
+  rpc Login(LoginRequest) returns (LoginResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/login"
+      body: "*"
+    };
+  }
+
+  // RefreshToken generates a new access token using a refresh token
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/refresh"
+      body: "*"
+    };
+  }
+
+  // Logout revokes the current refresh token
+  rpc Logout(LogoutRequest) returns (LogoutResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/logout"
+      body: "*"
+    };
+  }
+
+  // ChangePassword allows authenticated users to change their password
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
+    option (google.api.http) = {
+      post: "/v1/auth/change-password"
+      body: "*"
+    };
+  }
+}
+
+// RegisterRequest contains user registration information
+message RegisterRequest {
+  string username = 1;
+  string master_password = 2;
+  string device_info = 3;
+}
+
+// RegisterResponse contains registration result
+message RegisterResponse {
+  string user_id = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  string message = 5;
+}
+
+// LoginRequest contains user login credentials
+message LoginRequest {
+  string username = 1;
+  string master_password = 2;
+  string device_info = 3;
+}
+
+// LoginResponse contains authentication tokens
+message LoginResponse {
+  string user_id = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  string message = 5;
+}
+
+// RefreshTokenRequest contains the refresh token
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+// RefreshTokenResponse contains a new access token
+message RefreshTokenResponse {
+  string access_token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  string message = 3;
+}
+
+// LogoutRequest contains the refresh token to revoke
+message LogoutRequest {
+  string refresh_token = 1;
+}
+
+// LogoutResponse confirms logout
+message LogoutResponse {
+  string message = 1;
+}
+
+// ChangePasswordRequest contains old and new passwords
+message ChangePasswordRequest {
+  string old_password = 1;
+  string new_password = 2;
+}
+
+// ChangePasswordResponse confirms password change
+message ChangePasswordResponse {
+  string message = 1;
+  // New tokens after password change (re-encryption required)
+  string access_token = 2;
+  string refresh_token = 3;
+  google.protobuf.Timestamp expires_at = 4;
+}
