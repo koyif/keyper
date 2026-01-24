@@ -28,6 +28,12 @@ type Config struct {
 
 	// DBPath is the path to the local SQLite database
 	DBPath string `mapstructure:"db_path"`
+
+	// DeviceID is a unique identifier for this device (UUID v4)
+	DeviceID string `mapstructure:"device_id"`
+
+	// LastSyncAt is the timestamp of the last successful sync (RFC3339 format)
+	LastSyncAt string `mapstructure:"last_sync_at"`
 }
 
 // DefaultConfig returns a Config with default values
