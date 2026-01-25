@@ -453,6 +453,10 @@ func TestPushResultStructure(t *testing.T) {
 	if len(result.FailedSecretIDs) != 1 {
 		t.Errorf("FailedSecretIDs count mismatch: got %d, want 1", len(result.FailedSecretIDs))
 	}
+
+	if result.Message != "Push completed" {
+		t.Errorf("Message mismatch: got %s, want 'Push completed'", result.Message)
+	}
 }
 
 // Note: Full integration tests for PushWithRetry require a mock gRPC server

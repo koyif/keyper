@@ -364,7 +364,7 @@ func newCardAddCmd(getCfg func() *config.Config, getSess func() *session.Session
 }
 
 // newCardGetCmd creates the get card command
-func newCardGetCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newCardGetCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get [name or ID]",
 		Short: "Get a bank card by name or ID",
@@ -463,7 +463,7 @@ func newCardGetCmd(getCfg func() *config.Config, getSess func() *session.Session
 }
 
 // newCardListCmd creates the list cards command
-func newCardListCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newCardListCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var showDeleted bool
 
 	cmd := &cobra.Command{
@@ -774,7 +774,7 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 }
 
 // newCardDeleteCmd creates the delete card command
-func newCardDeleteCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newCardDeleteCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var noConfirm bool
 
 	cmd := &cobra.Command{

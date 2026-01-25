@@ -395,7 +395,7 @@ func newBinaryGetCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 }
 
 // newBinaryListCmd creates the list binary secrets command
-func newBinaryListCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newBinaryListCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var showDeleted bool
 
 	cmd := &cobra.Command{
@@ -496,7 +496,7 @@ func newBinaryListCmd(getCfg func() *config.Config, getSess func() *session.Sess
 }
 
 // newBinaryDeleteCmd creates the delete binary secret command
-func newBinaryDeleteCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newBinaryDeleteCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var noConfirm bool
 
 	cmd := &cobra.Command{

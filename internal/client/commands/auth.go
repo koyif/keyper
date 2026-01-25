@@ -9,6 +9,8 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/koy/keyper/internal/client/config"
 	"github.com/koy/keyper/internal/client/session"
+	"github.com/koy/keyper/internal/client/storage"
+	"github.com/koy/keyper/internal/client/sync"
 	"github.com/koy/keyper/internal/crypto"
 	pb "github.com/koy/keyper/pkg/api/proto"
 	"github.com/sirupsen/logrus"
@@ -19,22 +21,22 @@ import (
 
 // NewAuthCommands returns the auth command group
 // getCfg and getSess are functions that return the current config and session
-func NewAuthCommands(getCfg func() *config.Config, getSess func() *session.Session) *cobra.Command {
+func NewAuthCommands(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	authCmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Authentication commands",
 		Long:  "Commands for user authentication (register, login, logout)",
 	}
 
-	authCmd.AddCommand(newRegisterCmd(getCfg, getSess))
-	authCmd.AddCommand(newLoginCmd(getCfg, getSess))
+	authCmd.AddCommand(newRegisterCmd(getCfg, getSess, getStorage))
+	authCmd.AddCommand(newLoginCmd(getCfg, getSess, getStorage))
 	authCmd.AddCommand(newLogoutCmd(getCfg, getSess))
 
 	return authCmd
 }
 
 // newRegisterCmd creates the register command
-func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Session) *cobra.Command {
+func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "register",
 		Short: "Register a new user account",
@@ -156,8 +158,10 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 }
 
 // newLoginCmd creates the login command
-func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session) *cobra.Command {
-	return &cobra.Command{
+func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+	var noSync bool
+
+	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Login to your account",
 		Long:  "Authenticate with your username and master password",
@@ -251,9 +255,25 @@ func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session) 
 			fmt.Printf("  User ID: %s\n", resp.UserId)
 			fmt.Printf("  %s\n", resp.Message)
 
+			// Trigger automatic sync after login (unless --no-sync flag is set)
+			if !noSync {
+				fmt.Println()
+				if err := performAutoSync(ctx, cfg, sess, getStorage); err != nil {
+					// Log warning but don't fail the login
+					logrus.Warnf("Automatic sync failed: %v", err)
+					fmt.Printf("\n⚠ Automatic sync failed: %v\n", err)
+					fmt.Println("You can manually sync later with: keyper sync")
+				}
+			}
+
 			return nil
 		},
 	}
+
+	// Add flag to disable automatic sync
+	cmd.Flags().BoolVar(&noSync, "no-sync", false, "Skip automatic sync after login")
+
+	return cmd
 }
 
 // newLogoutCmd creates the logout command
@@ -304,4 +324,38 @@ func newLogoutCmd(getCfg func() *config.Config, getSess func() *session.Session)
 			return nil
 		},
 	}
+}
+
+// performAutoSync performs an automatic sync after login.
+// This is a non-blocking operation that provides user feedback.
+func performAutoSync(ctx context.Context, cfg *config.Config, sess *session.Session, getStorage func() (storage.Repository, error)) error {
+	fmt.Println("Syncing with server...")
+
+	// Open storage
+	repo, err := getStorage()
+	if err != nil {
+		return fmt.Errorf("failed to open storage: %w", err)
+	}
+	defer repo.Close()
+
+	// Create sync options with progress callback
+	opts := &sync.SyncOptions{
+		ProgressCallback: func(msg string) {
+			logrus.Debug(msg)
+		},
+	}
+
+	// Perform sync
+	result, err := sync.Sync(ctx, cfg, sess, repo, opts)
+	if err != nil {
+		return err
+	}
+
+	// Print brief summary
+	if result.Success {
+		fmt.Printf("✓ Sync complete: %d changes pushed, %d conflicts\n",
+			result.PushedSecrets, result.ConflictCount)
+	}
+
+	return nil
 }

@@ -37,7 +37,7 @@ func NewCredentialCommands(getCfg func() *config.Config, getSess func() *session
 }
 
 // newCredentialAddCmd creates the add credential command
-func newCredentialAddCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newCredentialAddCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var (
 		nameFlag     string
 		usernameFlag string
@@ -212,7 +212,7 @@ func newCredentialAddCmd(getCfg func() *config.Config, getSess func() *session.S
 }
 
 // newCredentialGetCmd creates the get credential command
-func newCredentialGetCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newCredentialGetCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get [name or ID]",
 		Short: "Get a credential by name or ID",
@@ -307,7 +307,7 @@ func newCredentialGetCmd(getCfg func() *config.Config, getSess func() *session.S
 }
 
 // newCredentialListCmd creates the list credentials command
-func newCredentialListCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newCredentialListCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var showDeleted bool
 
 	cmd := &cobra.Command{
@@ -555,7 +555,7 @@ func newCredentialUpdateCmd(getCfg func() *config.Config, getSess func() *sessio
 }
 
 // newCredentialDeleteCmd creates the delete credential command
-func newCredentialDeleteCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newCredentialDeleteCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var noConfirm bool
 
 	cmd := &cobra.Command{

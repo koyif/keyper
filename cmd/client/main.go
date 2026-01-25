@@ -122,7 +122,7 @@ func addCommands() {
 	}
 
 	// Add auth commands
-	rootCmd.AddCommand(commands.NewAuthCommands(getCfg, getSess))
+	rootCmd.AddCommand(commands.NewAuthCommands(getCfg, getSess, getStorage))
 
 	// Add credential commands
 	rootCmd.AddCommand(commands.NewCredentialCommands(getCfg, getSess, getStorage))

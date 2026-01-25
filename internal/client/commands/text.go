@@ -37,7 +37,7 @@ func NewTextCommands(getCfg func() *config.Config, getSess func() *session.Sessi
 }
 
 // newTextAddCmd creates the add text note command
-func newTextAddCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newTextAddCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var (
 		nameFlag    string
 		contentFlag string
@@ -199,7 +199,7 @@ func newTextAddCmd(getCfg func() *config.Config, getSess func() *session.Session
 }
 
 // newTextGetCmd creates the get text note command
-func newTextGetCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newTextGetCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get [name or ID]",
 		Short: "Get a text note by name or ID",
@@ -292,7 +292,7 @@ func newTextGetCmd(getCfg func() *config.Config, getSess func() *session.Session
 }
 
 // newTextListCmd creates the list text notes command
-func newTextListCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newTextListCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var showDeleted bool
 
 	cmd := &cobra.Command{
@@ -538,7 +538,7 @@ func newTextUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 }
 
 // newTextDeleteCmd creates the delete text note command
-func newTextDeleteCmd(getCfg func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
+func newTextDeleteCmd(_ func() *config.Config, getSess func() *session.Session, getStorage func() (storage.Repository, error)) *cobra.Command {
 	var noConfirm bool
 
 	cmd := &cobra.Command{

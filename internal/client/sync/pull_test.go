@@ -55,17 +55,6 @@ func setupTestSession(t *testing.T, sessionPath string) *session.Session {
 	return sess
 }
 
-// setupTestSessionWithEncryption creates a test session with encryption key.
-// NOTE: Currently unused but reserved for future integration tests.
-//
-//nolint:unused,deadcode
-func setupTestSessionWithEncryption(t *testing.T, sessionPath string, encryptionKey []byte) *session.Session {
-	t.Helper()
-	sess := setupTestSession(t, sessionPath)
-	sess.SetEncryptionKey(encryptionKey)
-	return sess
-}
-
 func TestPull_NotAuthenticated(t *testing.T) {
 	cfg, cleanup := setupTestConfig(t)
 	defer cleanup()
