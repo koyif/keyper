@@ -141,6 +141,9 @@ func addCommands() {
 
 	// Add sync command
 	rootCmd.AddCommand(commands.NewSyncCommand(getCfg, getSess, getStorage))
+
+	// Add TUI command
+	rootCmd.AddCommand(commands.NewTUICommand(getCfg, getSess, getStorage))
 }
 
 func main() {
