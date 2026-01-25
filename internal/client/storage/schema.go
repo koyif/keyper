@@ -3,10 +3,10 @@ package storage
 // Schema definitions for the SQLite database
 
 const (
-	// Schema version for migrations
-	CurrentSchemaVersion = 1
+	// CurrentSchemaVersion is the schema version for migrations.
+	CurrentSchemaVersion = 3
 
-	// Table creation SQL statements
+	// createSecretsTableSQL contains the table creation SQL statement.
 	createSecretsTableSQL = `
 		CREATE TABLE IF NOT EXISTS secrets (
 			id TEXT PRIMARY KEY,
@@ -25,6 +25,24 @@ const (
 		);
 	`
 
+	createConflictsTableSQL = `
+		CREATE TABLE IF NOT EXISTS conflicts (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			secret_id TEXT NOT NULL,
+			conflict_type INTEGER NOT NULL,
+			local_version INTEGER NOT NULL,
+			server_version INTEGER NOT NULL,
+			local_data BLOB NOT NULL,
+			server_data BLOB NOT NULL,
+			local_updated_at TIMESTAMP NOT NULL,
+			server_updated_at TIMESTAMP NOT NULL,
+			detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			resolved BOOLEAN NOT NULL DEFAULT 0,
+			resolved_at TIMESTAMP,
+			resolution_strategy TEXT
+		);
+	`
+
 	createSchemaMigrationsTableSQL = `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version INTEGER PRIMARY KEY,
@@ -32,7 +50,7 @@ const (
 		);
 	`
 
-	// Index creation SQL statements
+	// createSecretsTypeIndexSQL contains the index creation SQL statement.
 	createSecretsTypeIndexSQL = `
 		CREATE INDEX IF NOT EXISTS idx_secrets_type ON secrets(type);
 	`
@@ -49,7 +67,15 @@ const (
 		CREATE INDEX IF NOT EXISTS idx_secrets_name ON secrets(name);
 	`
 
-	// Schema migration queries
+	createConflictsSecretIDIndexSQL = `
+		CREATE INDEX IF NOT EXISTS idx_conflicts_secret_id ON conflicts(secret_id);
+	`
+
+	createConflictsResolvedIndexSQL = `
+		CREATE INDEX IF NOT EXISTS idx_conflicts_resolved ON conflicts(resolved);
+	`
+
+	// insertMigrationSQL contains the schema migration query.
 	insertMigrationSQL = `
 		INSERT INTO schema_migrations (version) VALUES (?);
 	`

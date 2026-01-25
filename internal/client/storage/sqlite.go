@@ -6,15 +6,16 @@ import (
 	"fmt"
 	"time"
 
+	// Register SQLite driver for database/sql
 	_ "modernc.org/sqlite"
 )
 
-// SQLiteRepository implements the Repository interface using SQLite
+// SQLiteRepository implements the Repository interface using SQLite.
 type SQLiteRepository struct {
 	db *sql.DB
 }
 
-// NewSQLiteRepository creates a new SQLite repository
+// NewSQLiteRepository creates a new SQLite repository.
 func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	// Open database with SQLite URI
 	db, err := sql.Open("sqlite", fmt.Sprintf("file:%s?cache=shared&mode=rwc&_journal_mode=WAL", dbPath))
@@ -44,7 +45,7 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	return repo, nil
 }
 
-// migrate runs database migrations
+// migrate runs database migrations.
 func (r *SQLiteRepository) migrate() error {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -80,6 +81,42 @@ func (r *SQLiteRepository) migrate() error {
 				createSecretsNameIndexSQL,
 			},
 		},
+		{
+			version: 2,
+			sql: []string{
+				createConflictsTableSQL,
+				createConflictsSecretIDIndexSQL,
+				createConflictsResolvedIndexSQL,
+			},
+		},
+		{
+			version: 3,
+			sql: []string{
+				// Remove foreign key constraint by recreating conflicts table
+				// SQLite doesn't support ALTER TABLE DROP CONSTRAINT, so we need to recreate
+				`CREATE TABLE conflicts_new (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					secret_id TEXT NOT NULL,
+					conflict_type INTEGER NOT NULL,
+					local_version INTEGER NOT NULL,
+					server_version INTEGER NOT NULL,
+					local_data BLOB NOT NULL,
+					server_data BLOB NOT NULL,
+					local_updated_at TIMESTAMP NOT NULL,
+					server_updated_at TIMESTAMP NOT NULL,
+					detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					resolved BOOLEAN NOT NULL DEFAULT 0,
+					resolved_at TIMESTAMP,
+					resolution_strategy TEXT
+				)`,
+				`INSERT INTO conflicts_new (id, secret_id, conflict_type, local_version, server_version, local_data, server_data, local_updated_at, server_updated_at, detected_at, resolved, resolved_at, resolution_strategy)
+				 SELECT id, secret_id, conflict_type, local_version, server_version, local_data, server_data, local_updated_at, server_updated_at, detected_at, resolved, resolved_at, resolution_strategy FROM conflicts`,
+				`DROP TABLE conflicts`,
+				`ALTER TABLE conflicts_new RENAME TO conflicts`,
+				createConflictsSecretIDIndexSQL,
+				createConflictsResolvedIndexSQL,
+			},
+		},
 	}
 
 	for _, migration := range migrations {
@@ -103,7 +140,7 @@ func (r *SQLiteRepository) migrate() error {
 	return tx.Commit()
 }
 
-// Create creates a new secret
+// Create creates a new secret.
 func (r *SQLiteRepository) Create(ctx context.Context, secret *LocalSecret) error {
 	query := `
 		INSERT INTO secrets (
@@ -142,7 +179,7 @@ func (r *SQLiteRepository) Create(ctx context.Context, secret *LocalSecret) erro
 	return nil
 }
 
-// Get retrieves a secret by ID
+// Get retrieves a secret by ID.
 func (r *SQLiteRepository) Get(ctx context.Context, id string) (*LocalSecret, error) {
 	query := `
 		SELECT id, name, type, encrypted_data, nonce, metadata,
@@ -159,7 +196,7 @@ func (r *SQLiteRepository) Get(ctx context.Context, id string) (*LocalSecret, er
 		&secret.ServerVersion, &secret.CreatedAt, &secret.UpdatedAt, &secret.LocalUpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("secret not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrSecretNotFound, id)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get secret: %w", err)
@@ -168,7 +205,7 @@ func (r *SQLiteRepository) Get(ctx context.Context, id string) (*LocalSecret, er
 	return secret, nil
 }
 
-// GetByName retrieves a secret by name
+// GetByName retrieves a secret by name.
 func (r *SQLiteRepository) GetByName(ctx context.Context, name string) (*LocalSecret, error) {
 	query := `
 		SELECT id, name, type, encrypted_data, nonce, metadata,
@@ -187,7 +224,7 @@ func (r *SQLiteRepository) GetByName(ctx context.Context, name string) (*LocalSe
 		&secret.ServerVersion, &secret.CreatedAt, &secret.UpdatedAt, &secret.LocalUpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("secret not found: %s", name)
+		return nil, fmt.Errorf("%w: %s", ErrSecretNotFound, name)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get secret by name: %w", err)
@@ -196,7 +233,7 @@ func (r *SQLiteRepository) GetByName(ctx context.Context, name string) (*LocalSe
 	return secret, nil
 }
 
-// Update updates an existing secret
+// Update updates an existing secret.
 func (r *SQLiteRepository) Update(ctx context.Context, secret *LocalSecret) error {
 	query := `
 		UPDATE secrets
@@ -207,9 +244,6 @@ func (r *SQLiteRepository) Update(ctx context.Context, secret *LocalSecret) erro
 	`
 
 	secret.LocalUpdatedAt = time.Now()
-	if secret.SyncStatus == SyncStatusSynced {
-		secret.SyncStatus = SyncStatusPending
-	}
 
 	result, err := r.db.ExecContext(ctx, query,
 		secret.Name, secret.Type, secret.EncryptedData, secret.Nonce, secret.Metadata,
@@ -225,13 +259,13 @@ func (r *SQLiteRepository) Update(ctx context.Context, secret *LocalSecret) erro
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("secret not found: %s", secret.ID)
+		return fmt.Errorf("%w: %s", ErrSecretNotFound, secret.ID)
 	}
 
 	return nil
 }
 
-// Delete soft-deletes a secret (sets is_deleted flag)
+// Delete soft-deletes a secret (sets is_deleted flag).
 func (r *SQLiteRepository) Delete(ctx context.Context, id string) error {
 	query := `
 		UPDATE secrets
@@ -249,13 +283,13 @@ func (r *SQLiteRepository) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("secret not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrSecretNotFound, id)
 	}
 
 	return nil
 }
 
-// HardDelete permanently removes a secret from the database
+// HardDelete permanently removes a secret from the database.
 func (r *SQLiteRepository) HardDelete(ctx context.Context, id string) error {
 	query := `DELETE FROM secrets WHERE id = ?`
 
@@ -269,13 +303,13 @@ func (r *SQLiteRepository) HardDelete(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("secret not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrSecretNotFound, id)
 	}
 
 	return nil
 }
 
-// List retrieves all secrets with optional filters
+// List retrieves all secrets with optional filters.
 func (r *SQLiteRepository) List(ctx context.Context, filters ListFilters) ([]*LocalSecret, error) {
 	query := `
 		SELECT id, name, type, encrypted_data, nonce, metadata,
@@ -284,7 +318,7 @@ func (r *SQLiteRepository) List(ctx context.Context, filters ListFilters) ([]*Lo
 		FROM secrets
 		WHERE 1=1
 	`
-	args := []interface{}{}
+	args := []any{}
 
 	if filters.Type != nil {
 		query += " AND type = ?"
@@ -339,7 +373,7 @@ func (r *SQLiteRepository) List(ctx context.Context, filters ListFilters) ([]*Lo
 	return secrets, nil
 }
 
-// GetPendingSync retrieves all secrets that need to be synced
+// GetPendingSync retrieves all secrets that need to be synced.
 func (r *SQLiteRepository) GetPendingSync(ctx context.Context) ([]*LocalSecret, error) {
 	syncStatus := SyncStatusPending
 	return r.List(ctx, ListFilters{
@@ -348,7 +382,7 @@ func (r *SQLiteRepository) GetPendingSync(ctx context.Context) ([]*LocalSecret, 
 	})
 }
 
-// UpdateSyncStatus updates the sync status of a secret
+// UpdateSyncStatus updates the sync status of a secret.
 func (r *SQLiteRepository) UpdateSyncStatus(ctx context.Context, id string, status SyncStatus, serverVersion int64) error {
 	query := `
 		UPDATE secrets
@@ -366,16 +400,257 @@ func (r *SQLiteRepository) UpdateSyncStatus(ctx context.Context, id string, stat
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("secret not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrSecretNotFound, id)
 	}
 
 	return nil
 }
 
-// Close closes the database connection
+// Close closes the database connection.
 func (r *SQLiteRepository) Close() error {
 	if r.db != nil {
 		return r.db.Close()
 	}
+	return nil
+}
+
+// BeginTx begins a new transaction.
+func (r *SQLiteRepository) BeginTx(ctx context.Context) (*sql.Tx, error) {
+	return r.db.BeginTx(ctx, nil)
+}
+
+// CreateInTx creates a secret within a transaction.
+func (r *SQLiteRepository) CreateInTx(ctx context.Context, tx *sql.Tx, secret *LocalSecret) error {
+	query := `
+		INSERT INTO secrets (
+			id, name, type, encrypted_data, nonce, metadata,
+			version, is_deleted, sync_status, server_version,
+			created_at, updated_at, local_updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	now := time.Now()
+	if secret.CreatedAt.IsZero() {
+		secret.CreatedAt = now
+	}
+	if secret.UpdatedAt.IsZero() {
+		secret.UpdatedAt = now
+	}
+	if secret.LocalUpdatedAt.IsZero() {
+		secret.LocalUpdatedAt = now
+	}
+	if secret.Version == 0 {
+		secret.Version = 1
+	}
+	if secret.SyncStatus == "" {
+		secret.SyncStatus = SyncStatusPending
+	}
+
+	_, err := tx.ExecContext(ctx, query,
+		secret.ID, secret.Name, secret.Type, secret.EncryptedData, secret.Nonce,
+		secret.Metadata, secret.Version, secret.IsDeleted, secret.SyncStatus,
+		secret.ServerVersion, secret.CreatedAt, secret.UpdatedAt, secret.LocalUpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create secret in transaction: %w", err)
+	}
+
+	return nil
+}
+
+// GetInTx retrieves a secret by ID within a transaction.
+func (r *SQLiteRepository) GetInTx(ctx context.Context, tx *sql.Tx, id string) (*LocalSecret, error) {
+	query := `
+		SELECT id, name, type, encrypted_data, nonce, metadata,
+		       version, is_deleted, sync_status, server_version,
+		       created_at, updated_at, local_updated_at
+		FROM secrets
+		WHERE id = ?
+	`
+
+	secret := &LocalSecret{}
+	err := tx.QueryRowContext(ctx, query, id).Scan(
+		&secret.ID, &secret.Name, &secret.Type, &secret.EncryptedData, &secret.Nonce,
+		&secret.Metadata, &secret.Version, &secret.IsDeleted, &secret.SyncStatus,
+		&secret.ServerVersion, &secret.CreatedAt, &secret.UpdatedAt, &secret.LocalUpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, ErrSecretNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get secret in transaction: %w", err)
+	}
+
+	return secret, nil
+}
+
+// UpdateInTx updates a secret within a transaction.
+func (r *SQLiteRepository) UpdateInTx(ctx context.Context, tx *sql.Tx, secret *LocalSecret) error {
+	query := `
+		UPDATE secrets
+		SET name = ?, type = ?, encrypted_data = ?, nonce = ?, metadata = ?,
+		    version = ?, is_deleted = ?, sync_status = ?, server_version = ?,
+		    updated_at = ?, local_updated_at = ?
+		WHERE id = ?
+	`
+
+	secret.LocalUpdatedAt = time.Now()
+
+	result, err := tx.ExecContext(ctx, query,
+		secret.Name, secret.Type, secret.EncryptedData, secret.Nonce, secret.Metadata,
+		secret.Version, secret.IsDeleted, secret.SyncStatus, secret.ServerVersion,
+		secret.UpdatedAt, secret.LocalUpdatedAt, secret.ID,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update secret in transaction: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrSecretNotFound, secret.ID)
+	}
+
+	return nil
+}
+
+// HardDeleteInTx permanently removes a secret within a transaction.
+func (r *SQLiteRepository) HardDeleteInTx(ctx context.Context, tx *sql.Tx, id string) error {
+	query := `DELETE FROM secrets WHERE id = ?`
+
+	result, err := tx.ExecContext(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("failed to hard delete secret in transaction: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %s", ErrSecretNotFound, id)
+	}
+
+	return nil
+}
+
+// CreateConflict stores a conflict for later resolution.
+func (r *SQLiteRepository) CreateConflict(ctx context.Context, conflict *Conflict) error {
+	tx, err := r.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() {
+		// nolint:errcheck // Rollback error is expected to fail after Commit
+		_ = tx.Rollback()
+	}()
+
+	if err := r.CreateConflictInTx(ctx, tx, conflict); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// GetUnresolvedConflicts retrieves all unresolved conflicts.
+func (r *SQLiteRepository) GetUnresolvedConflicts(ctx context.Context) ([]*Conflict, error) {
+	query := `
+		SELECT id, secret_id, conflict_type, local_version, server_version,
+		       local_data, server_data, local_updated_at, server_updated_at,
+		       detected_at, resolved, resolved_at, resolution_strategy
+		FROM conflicts
+		WHERE resolved = 0
+		ORDER BY detected_at DESC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query unresolved conflicts: %w", err)
+	}
+	defer rows.Close()
+
+	var conflicts []*Conflict
+	for rows.Next() {
+		conflict := &Conflict{}
+		err := rows.Scan(
+			&conflict.ID, &conflict.SecretID, &conflict.ConflictType,
+			&conflict.LocalVersion, &conflict.ServerVersion,
+			&conflict.LocalData, &conflict.ServerData,
+			&conflict.LocalUpdatedAt, &conflict.ServerUpdatedAt,
+			&conflict.DetectedAt, &conflict.Resolved,
+			&conflict.ResolvedAt, &conflict.ResolutionStrategy,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan conflict: %w", err)
+		}
+		conflicts = append(conflicts, conflict)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating conflicts: %w", err)
+	}
+
+	return conflicts, nil
+}
+
+// ResolveConflict marks a conflict as resolved.
+func (r *SQLiteRepository) ResolveConflict(ctx context.Context, id int64, strategy string) error {
+	query := `
+		UPDATE conflicts
+		SET resolved = 1, resolved_at = ?, resolution_strategy = ?
+		WHERE id = ?
+	`
+
+	result, err := r.db.ExecContext(ctx, query, time.Now(), strategy, id)
+	if err != nil {
+		return fmt.Errorf("failed to resolve conflict: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("%w: %d", ErrConflictNotFound, id)
+	}
+
+	return nil
+}
+
+// CreateConflictInTx stores a conflict within a transaction.
+func (r *SQLiteRepository) CreateConflictInTx(ctx context.Context, tx *sql.Tx, conflict *Conflict) error {
+	query := `
+		INSERT INTO conflicts (
+			secret_id, conflict_type, local_version, server_version,
+			local_data, server_data, local_updated_at, server_updated_at,
+			detected_at, resolved, resolution_strategy
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
+
+	if conflict.DetectedAt.IsZero() {
+		conflict.DetectedAt = time.Now()
+	}
+
+	result, err := tx.ExecContext(ctx, query,
+		conflict.SecretID, conflict.ConflictType, conflict.LocalVersion, conflict.ServerVersion,
+		conflict.LocalData, conflict.ServerData, conflict.LocalUpdatedAt, conflict.ServerUpdatedAt,
+		conflict.DetectedAt, conflict.Resolved, conflict.ResolutionStrategy,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create conflict in transaction: %w", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to get conflict ID: %w", err)
+	}
+
+	conflict.ID = id
 	return nil
 }

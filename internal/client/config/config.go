@@ -34,6 +34,10 @@ type Config struct {
 
 	// LastSyncAt is the timestamp of the last successful sync (RFC3339 format)
 	LastSyncAt string `mapstructure:"last_sync_at"`
+
+	// ManualConflictResolution when true, requires user to manually resolve conflicts
+	// When false (default), uses last-write-wins strategy
+	ManualConflictResolution bool `mapstructure:"manual_conflict_resolution"`
 }
 
 // DefaultConfig returns a Config with default values

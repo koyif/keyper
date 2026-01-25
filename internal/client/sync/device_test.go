@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/koy/keyper/internal/client/config"
 )
 
@@ -65,7 +66,7 @@ func TestLoadOrCreateDeviceID_CreatesNewIDOnFirstRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to stat config file: %v", err)
 	}
-	if info.Mode().Perm() != 0600 {
+	if info.Mode().Perm() != 0o600 {
 		t.Errorf("Config file has incorrect permissions: got %o, want 0600", info.Mode().Perm())
 	}
 }

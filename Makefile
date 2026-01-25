@@ -1,4 +1,4 @@
-.PHONY: proto proto-clean test test-crypto build-server build-client run-server clean help db-up db-down db-reset migrate-up migrate-down migrate-create migrate-status
+.PHONY: proto proto-clean test test-crypto test-coverage build-server build-client build run-server clean help db-up db-down db-reset migrate-up migrate-down migrate-create migrate-status deps install-tools install-lint lint lint-fix
 
 # Directories
 PROTO_DIR := pkg/api/proto
@@ -14,6 +14,7 @@ PROTOC_GEN_GO := $(shell go env GOPATH)/bin/protoc-gen-go
 PROTOC_GEN_GO_GRPC := $(shell go env GOPATH)/bin/protoc-gen-go-grpc
 PROTOC_GEN_GRPC_GATEWAY := $(shell go env GOPATH)/bin/protoc-gen-grpc-gateway
 PROTOC_GEN_OPENAPIV2 := $(shell go env GOPATH)/bin/protoc-gen-openapiv2
+GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
 
 # Include paths for googleapis
 GOOGLEAPIS_DIR := third_party
@@ -109,6 +110,19 @@ install-tools: ## Install required protoc plugins
 	@go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@latest
 	@go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@latest
 	@echo "Tools installed successfully!"
+
+install-lint: ## Install golangci-lint
+	@echo "Installing golangci-lint..."
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@echo "golangci-lint installed successfully!"
+
+lint: ## Run golangci-lint
+	@echo "Running linters..."
+	@$(GOLANGCI_LINT) run ./...
+
+lint-fix: ## Run golangci-lint with auto-fix
+	@echo "Running linters with auto-fix..."
+	@$(GOLANGCI_LINT) run --fix ./...
 
 db-up: ## Start PostgreSQL database using Docker Compose
 	@echo "Starting database..."

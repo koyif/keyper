@@ -9,7 +9,7 @@ import (
 	"github.com/koy/keyper/pkg/api/proto"
 )
 
-// setupTestDB creates an in-memory SQLite database for testing
+// setupTestDB creates an in-memory SQLite database for testing.
 func setupTestDB(t *testing.T) *SQLiteRepository {
 	t.Helper()
 
@@ -225,6 +225,7 @@ func TestUpdate(t *testing.T) {
 	secret.Name = "Updated Name"
 	secret.EncryptedData = []byte("updated-data")
 	secret.Version = 2
+	secret.SyncStatus = SyncStatusPending // Caller must explicitly set status
 
 	err = repo.Update(ctx, secret)
 	if err != nil {
@@ -246,7 +247,7 @@ func TestUpdate(t *testing.T) {
 	if retrieved.Version != 2 {
 		t.Errorf("Expected version 2, got %d", retrieved.Version)
 	}
-	// Sync status should change to pending when updating
+	// Sync status should be as set by caller
 	if retrieved.SyncStatus != SyncStatusPending {
 		t.Errorf("Expected sync status 'pending', got '%s'", retrieved.SyncStatus)
 	}

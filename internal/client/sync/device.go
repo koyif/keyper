@@ -6,14 +6,13 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"github.com/koy/keyper/internal/client/config"
 	"github.com/spf13/viper"
+
+	"github.com/koy/keyper/internal/client/config"
 )
 
-var (
-	// deviceIDMutex protects device ID loading/creation to prevent race conditions
-	deviceIDMutex sync.Mutex
-)
+// deviceIDMutex protects device ID loading/creation to prevent race conditions.
+var deviceIDMutex sync.Mutex
 
 // LoadOrCreateDeviceID loads the device ID from config or generates a new one if it doesn't exist.
 // The device ID is a UUID v4 that uniquely identifies this device for sync operations.
@@ -56,7 +55,7 @@ func LoadOrCreateDeviceID(cfg *config.Config) (string, error) {
 	return deviceID, nil
 }
 
-// saveDeviceID persists the device ID to the config file
+// saveDeviceID persists the device ID to the config file.
 func saveDeviceID(cfg *config.Config, deviceID string) error {
 	// Ensure config directory exists
 	if err := cfg.EnsureDirectories(); err != nil {
@@ -85,14 +84,14 @@ func saveDeviceID(cfg *config.Config, deviceID string) error {
 	}
 
 	// Ensure config file has secure permissions (0600 - read/write for owner only)
-	if err := os.Chmod(cfg.ConfigPath, 0600); err != nil {
+	if err := os.Chmod(cfg.ConfigPath, 0o600); err != nil {
 		return fmt.Errorf("failed to set config file permissions: %w", err)
 	}
 
 	return nil
 }
 
-// UpdateLastSyncAt updates the last sync timestamp in the config file
+// UpdateLastSyncAt updates the last sync timestamp in the config file.
 func UpdateLastSyncAt(cfg *config.Config, timestamp string) error {
 	// Ensure config directory exists
 	if err := cfg.EnsureDirectories(); err != nil {
@@ -121,14 +120,14 @@ func UpdateLastSyncAt(cfg *config.Config, timestamp string) error {
 	cfg.LastSyncAt = timestamp
 
 	// Ensure config file has secure permissions (0600 - read/write for owner only)
-	if err := os.Chmod(cfg.ConfigPath, 0600); err != nil {
+	if err := os.Chmod(cfg.ConfigPath, 0o600); err != nil {
 		return fmt.Errorf("failed to set config file permissions: %w", err)
 	}
 
 	return nil
 }
 
-// GetDeviceID returns the current device ID, generating one if necessary
+// GetDeviceID returns the current device ID, generating one if necessary.
 func GetDeviceID(cfg *config.Config) (string, error) {
 	return LoadOrCreateDeviceID(cfg)
 }
