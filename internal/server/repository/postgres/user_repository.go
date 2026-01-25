@@ -115,3 +115,28 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*reposi
 
 	return &user, nil
 }
+
+// Update updates an existing user's information.
+func (r *UserRepository) Update(ctx context.Context, user *repository.User) error {
+	query := `
+		UPDATE users
+		SET email = $2, password_hash = $3, encryption_key_verifier = $4, salt = $5, updated_at = CURRENT_TIMESTAMP
+		WHERE id = $1
+	`
+
+	q := getQuerier(ctx, r.pool)
+	result, err := q.Exec(ctx, query, user.ID, user.Email, user.PasswordHash, user.EncryptionKeyVerifier, user.Salt)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return fmt.Errorf("user with email %s: %w", user.Email, repository.ErrDuplicate)
+		}
+		return fmt.Errorf("failed to update user: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return repository.ErrNotFound
+	}
+
+	return nil
+}

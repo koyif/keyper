@@ -30,17 +30,45 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// AuthService handles user authentication and session management
+// AuthService handles user authentication and session management.
+//
+// All passwords are derived using Argon2id on the client side before being sent to the server.
+// The server never has access to the master password itself.
 type AuthServiceClient interface {
-	// Register creates a new user account
+	// Register creates a new user account.
+	//
+	// This endpoint creates a new user with a unique username and derives authentication
+	// credentials from the provided master password. The master password is used to derive
+	// two separate keys on the client: one for authentication and one for encryption.
+	// Only the authentication hash is sent to the server.
+	//
+	// Returns JWT access token (15 min expiry) and refresh token (30 day expiry).
 	Register(ctx context.Context, in *RegisterRequest, opts ...grpc.CallOption) (*RegisterResponse, error)
-	// Login authenticates a user and returns access/refresh tokens
+	// Login authenticates a user and returns access/refresh tokens.
+	//
+	// Validates the username and derived password hash, then issues JWT tokens.
+	// The access token should be included in the Authorization header as "Bearer <token>"
+	// for all subsequent authenticated requests.
+	//
+	// Access tokens expire after 15 minutes, refresh tokens after 30 days.
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
-	// RefreshToken generates a new access token using a refresh token
+	// RefreshToken generates a new access token using a refresh token.
+	//
+	// When an access token expires, use this endpoint with a valid refresh token
+	// to obtain a new access token without requiring the user to log in again.
+	// The refresh token itself is not rotated.
 	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error)
-	// Logout revokes the current refresh token
+	// Logout revokes the current refresh token.
+	//
+	// This endpoint requires authentication. It invalidates the provided refresh token
+	// and adds the current access token to a blacklist, effectively logging out the user.
+	// The client should clear all local session data after logout.
 	Logout(ctx context.Context, in *LogoutRequest, opts ...grpc.CallOption) (*LogoutResponse, error)
-	// ChangePassword allows authenticated users to change their password
+	// ChangePassword allows authenticated users to change their password.
+	//
+	// This endpoint requires authentication. Changing the password requires re-encryption
+	// of all secrets with the new encryption key. This operation happens on the client side.
+	// New tokens are issued after password change since the authentication hash changes.
 	ChangePassword(ctx context.Context, in *ChangePasswordRequest, opts ...grpc.CallOption) (*ChangePasswordResponse, error)
 }
 
@@ -106,17 +134,45 @@ func (c *authServiceClient) ChangePassword(ctx context.Context, in *ChangePasswo
 // All implementations must embed UnimplementedAuthServiceServer
 // for forward compatibility.
 //
-// AuthService handles user authentication and session management
+// AuthService handles user authentication and session management.
+//
+// All passwords are derived using Argon2id on the client side before being sent to the server.
+// The server never has access to the master password itself.
 type AuthServiceServer interface {
-	// Register creates a new user account
+	// Register creates a new user account.
+	//
+	// This endpoint creates a new user with a unique username and derives authentication
+	// credentials from the provided master password. The master password is used to derive
+	// two separate keys on the client: one for authentication and one for encryption.
+	// Only the authentication hash is sent to the server.
+	//
+	// Returns JWT access token (15 min expiry) and refresh token (30 day expiry).
 	Register(context.Context, *RegisterRequest) (*RegisterResponse, error)
-	// Login authenticates a user and returns access/refresh tokens
+	// Login authenticates a user and returns access/refresh tokens.
+	//
+	// Validates the username and derived password hash, then issues JWT tokens.
+	// The access token should be included in the Authorization header as "Bearer <token>"
+	// for all subsequent authenticated requests.
+	//
+	// Access tokens expire after 15 minutes, refresh tokens after 30 days.
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
-	// RefreshToken generates a new access token using a refresh token
+	// RefreshToken generates a new access token using a refresh token.
+	//
+	// When an access token expires, use this endpoint with a valid refresh token
+	// to obtain a new access token without requiring the user to log in again.
+	// The refresh token itself is not rotated.
 	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error)
-	// Logout revokes the current refresh token
+	// Logout revokes the current refresh token.
+	//
+	// This endpoint requires authentication. It invalidates the provided refresh token
+	// and adds the current access token to a blacklist, effectively logging out the user.
+	// The client should clear all local session data after logout.
 	Logout(context.Context, *LogoutRequest) (*LogoutResponse, error)
-	// ChangePassword allows authenticated users to change their password
+	// ChangePassword allows authenticated users to change their password.
+	//
+	// This endpoint requires authentication. Changing the password requires re-encryption
+	// of all secrets with the new encryption key. This operation happens on the client side.
+	// New tokens are issued after password change since the authentication hash changes.
 	ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }

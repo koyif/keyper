@@ -6,10 +6,87 @@ option go_package = "github.com/koyif/keyper/pkg/api/proto;proto";
 
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
-// AuthService handles user authentication and session management
+// Global OpenAPI configuration for Keyper API
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+  info: {
+    title: "Keyper API";
+    version: "1.0.0";
+    description: "End-to-end encrypted password manager API\n\n"
+                 "## Overview\n"
+                 "Keyper is a secure password manager with client-side encryption. All secrets are encrypted "
+                 "using AES-256-GCM before being sent to the server, ensuring that the server never has access "
+                 "to plaintext data.\n\n"
+                 "## Authentication\n"
+                 "Most endpoints require authentication. After logging in or registering, include the access token "
+                 "in the Authorization header:\n\n"
+                 "```\n"
+                 "Authorization: Bearer <access_token>\n"
+                 "```\n\n"
+                 "Access tokens expire after 15 minutes. Use the refresh token endpoint to obtain a new access token "
+                 "without requiring the user to log in again.\n\n"
+                 "## Encryption\n"
+                 "- **Master Password**: Never sent to server, used to derive two keys:\n"
+                 "  - Authentication Hash: Argon2id-derived, sent to server for authentication\n"
+                 "  - Encryption Key: Derived locally, used for AES-256-GCM encryption\n"
+                 "- **Secret Data**: All secret data is encrypted client-side before upload\n"
+                 "- **Zero-Knowledge**: Server stores only encrypted blobs\n\n"
+                 "## Offline-First Sync\n"
+                 "Keyper supports offline-first operation with automatic conflict resolution:\n"
+                 "- Clients can work without network connectivity\n"
+                 "- Changes sync automatically when connection is restored\n"
+                 "- Version vectors detect and resolve conflicts\n";
+    contact: {
+      name: "Keyper API Support";
+      url: "https://github.com/koyif/keyper";
+    };
+    license: {
+      name: "MIT License";
+      url: "https://opensource.org/licenses/MIT";
+    };
+  };
+  schemes: HTTPS;
+  schemes: HTTP;
+  consumes: "application/json";
+  produces: "application/json";
+  security_definitions: {
+    security: {
+      key: "Bearer";
+      value: {
+        type: TYPE_API_KEY;
+        in: IN_HEADER;
+        name: "Authorization";
+        description: "Enter your access token in the format: Bearer <token>";
+      }
+    }
+  };
+  security: {
+    security_requirement: {
+      key: "Bearer";
+      value: {};
+    }
+  };
+};
+
+// AuthService handles user authentication and session management.
+//
+// All passwords are derived using Argon2id on the client side before being sent to the server.
+// The server never has access to the master password itself.
 service AuthService {
-  // Register creates a new user account
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "User authentication and session management endpoints. "
+                 "Register and login do not require authentication. "
+                 "All other endpoints require a valid access token in the Authorization header."
+  };
+  // Register creates a new user account.
+  //
+  // This endpoint creates a new user with a unique username and derives authentication
+  // credentials from the provided master password. The master password is used to derive
+  // two separate keys on the client: one for authentication and one for encryption.
+  // Only the authentication hash is sent to the server.
+  //
+  // Returns JWT access token (15 min expiry) and refresh token (30 day expiry).
   rpc Register(RegisterRequest) returns (RegisterResponse) {
     option (google.api.http) = {
       post: "/v1/auth/register"
@@ -17,7 +94,13 @@ service AuthService {
     };
   }
 
-  // Login authenticates a user and returns access/refresh tokens
+  // Login authenticates a user and returns access/refresh tokens.
+  //
+  // Validates the username and derived password hash, then issues JWT tokens.
+  // The access token should be included in the Authorization header as "Bearer <token>"
+  // for all subsequent authenticated requests.
+  //
+  // Access tokens expire after 15 minutes, refresh tokens after 30 days.
   rpc Login(LoginRequest) returns (LoginResponse) {
     option (google.api.http) = {
       post: "/v1/auth/login"
@@ -25,7 +108,11 @@ service AuthService {
     };
   }
 
-  // RefreshToken generates a new access token using a refresh token
+  // RefreshToken generates a new access token using a refresh token.
+  //
+  // When an access token expires, use this endpoint with a valid refresh token
+  // to obtain a new access token without requiring the user to log in again.
+  // The refresh token itself is not rotated.
   rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse) {
     option (google.api.http) = {
       post: "/v1/auth/refresh"
@@ -33,7 +120,11 @@ service AuthService {
     };
   }
 
-  // Logout revokes the current refresh token
+  // Logout revokes the current refresh token.
+  //
+  // This endpoint requires authentication. It invalidates the provided refresh token
+  // and adds the current access token to a blacklist, effectively logging out the user.
+  // The client should clear all local session data after logout.
   rpc Logout(LogoutRequest) returns (LogoutResponse) {
     option (google.api.http) = {
       post: "/v1/auth/logout"
@@ -41,7 +132,11 @@ service AuthService {
     };
   }
 
-  // ChangePassword allows authenticated users to change their password
+  // ChangePassword allows authenticated users to change their password.
+  //
+  // This endpoint requires authentication. Changing the password requires re-encryption
+  // of all secrets with the new encryption key. This operation happens on the client side.
+  // New tokens are issued after password change since the authentication hash changes.
   rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse) {
     option (google.api.http) = {
       post: "/v1/auth/change-password"
@@ -50,71 +145,116 @@ service AuthService {
   }
 }
 
-// RegisterRequest contains user registration information
+// RegisterRequest contains user registration information.
 message RegisterRequest {
+  // Unique username for the account (3-50 characters, alphanumeric and underscore only)
   string username = 1;
+
+  // Argon2id-derived authentication hash (never the raw password)
   string master_password = 2;
+
+  // Optional device information for session tracking (e.g., "Chrome on macOS")
   string device_info = 3;
 }
 
-// RegisterResponse contains registration result
+// RegisterResponse contains registration result.
 message RegisterResponse {
+  // Unique user identifier (UUID)
   string user_id = 1;
+
+  // JWT access token (15 minute expiry) - use in Authorization header as "Bearer <token>"
   string access_token = 2;
+
+  // Refresh token (30 day expiry) - use to obtain new access tokens
   string refresh_token = 3;
+
+  // Access token expiration timestamp
   google.protobuf.Timestamp expires_at = 4;
+
+  // Human-readable success message
   string message = 5;
 }
 
-// LoginRequest contains user login credentials
+// LoginRequest contains user login credentials.
 message LoginRequest {
+  // Username for the account
   string username = 1;
+
+  // Argon2id-derived authentication hash (never the raw password)
   string master_password = 2;
+
+  // Optional device information for session tracking (e.g., "Chrome on macOS")
   string device_info = 3;
 }
 
-// LoginResponse contains authentication tokens
+// LoginResponse contains authentication tokens.
 message LoginResponse {
+  // Unique user identifier (UUID)
   string user_id = 1;
+
+  // JWT access token (15 minute expiry) - use in Authorization header as "Bearer <token>"
   string access_token = 2;
+
+  // Refresh token (30 day expiry) - use to obtain new access tokens
   string refresh_token = 3;
+
+  // Access token expiration timestamp
   google.protobuf.Timestamp expires_at = 4;
+
+  // Human-readable success message
   string message = 5;
 }
 
-// RefreshTokenRequest contains the refresh token
+// RefreshTokenRequest contains the refresh token.
 message RefreshTokenRequest {
+  // Valid refresh token obtained from login or registration
   string refresh_token = 1;
 }
 
-// RefreshTokenResponse contains a new access token
+// RefreshTokenResponse contains a new access token.
 message RefreshTokenResponse {
+  // New JWT access token (15 minute expiry)
   string access_token = 1;
+
+  // New access token expiration timestamp
   google.protobuf.Timestamp expires_at = 2;
+
+  // Human-readable success message
   string message = 3;
 }
 
-// LogoutRequest contains the refresh token to revoke
+// LogoutRequest contains the refresh token to revoke.
 message LogoutRequest {
+  // Refresh token to invalidate
   string refresh_token = 1;
 }
 
-// LogoutResponse confirms logout
+// LogoutResponse confirms logout.
 message LogoutResponse {
+  // Human-readable confirmation message
   string message = 1;
 }
 
-// ChangePasswordRequest contains old and new passwords
+// ChangePasswordRequest contains old and new passwords.
 message ChangePasswordRequest {
+  // Current Argon2id-derived authentication hash
   string old_password = 1;
+
+  // New Argon2id-derived authentication hash
   string new_password = 2;
 }
 
-// ChangePasswordResponse confirms password change
+// ChangePasswordResponse confirms password change.
 message ChangePasswordResponse {
+  // Human-readable confirmation message
   string message = 1;
-  // New tokens after password change (re-encryption required)
+
+  // New JWT access token (15 minute expiry) - old tokens are invalidated
   string access_token = 2;
+
+  // New refresh token (30 day expiry)
   string refresh_token = 3;
+
+  // New access token expiration timestamp
   google.protobuf.Timestamp expires_at = 4;
 }

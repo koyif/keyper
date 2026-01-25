@@ -31,19 +31,55 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// SecretsService handles CRUD operations for secrets
+// SecretsService handles CRUD operations for encrypted secrets.
+//
+// All secrets are encrypted client-side using AES-256-GCM before being sent to the server.
+// The server stores only encrypted blobs and metadata, never having access to plaintext data.
+// All endpoints require authentication via Bearer token in Authorization header.
 type SecretsServiceClient interface {
-	// CreateSecret creates a new secret
+	// CreateSecret creates a new encrypted secret.
+	//
+	// The encrypted_data field should contain the AES-256-GCM encrypted payload,
+	// base64-encoded. The encryption key is derived from the user's master password
+	// on the client side and never sent to the server.
+	//
+	// Requires: Authorization header with valid access token.
 	CreateSecret(ctx context.Context, in *CreateSecretRequest, opts ...grpc.CallOption) (*CreateSecretResponse, error)
-	// GetSecret retrieves a specific secret by ID
+	// GetSecret retrieves a specific secret by ID.
+	//
+	// Returns the encrypted secret data. Decryption must be performed client-side
+	// using the encryption key derived from the user's master password.
+	//
+	// Requires: Authorization header with valid access token.
 	GetSecret(ctx context.Context, in *GetSecretRequest, opts ...grpc.CallOption) (*GetSecretResponse, error)
-	// UpdateSecret updates an existing secret
+	// UpdateSecret updates an existing secret.
+	//
+	// Uses optimistic locking via the version field to prevent concurrent modification conflicts.
+	// If the version doesn't match the current server version, the update will fail.
+	//
+	// Requires: Authorization header with valid access token.
 	UpdateSecret(ctx context.Context, in *UpdateSecretRequest, opts ...grpc.CallOption) (*UpdateSecretResponse, error)
-	// DeleteSecret soft-deletes a secret
+	// DeleteSecret soft-deletes a secret.
+	//
+	// Secrets are soft-deleted (marked as deleted but not removed from database)
+	// to support synchronization with offline clients. Tombstone cleanup happens
+	// automatically after 30 days.
+	//
+	// Requires: Authorization header with valid access token.
 	DeleteSecret(ctx context.Context, in *DeleteSecretRequest, opts ...grpc.CallOption) (*DeleteSecretResponse, error)
-	// ListSecrets retrieves all secrets for the authenticated user
+	// ListSecrets retrieves all secrets for the authenticated user.
+	//
+	// Supports filtering by type and category, with pagination for large result sets.
+	// By default, soft-deleted secrets are excluded unless explicitly requested.
+	//
+	// Requires: Authorization header with valid access token.
 	ListSecrets(ctx context.Context, in *ListSecretsRequest, opts ...grpc.CallOption) (*ListSecretsResponse, error)
-	// SearchSecrets searches secrets by title, tags, or category
+	// SearchSecrets searches secrets by title, tags, or category.
+	//
+	// Performs server-side search on unencrypted metadata fields only.
+	// For searching encrypted content, decryption and search must be done client-side.
+	//
+	// Requires: Authorization header with valid access token.
 	SearchSecrets(ctx context.Context, in *SearchSecretsRequest, opts ...grpc.CallOption) (*SearchSecretsResponse, error)
 }
 
@@ -119,19 +155,55 @@ func (c *secretsServiceClient) SearchSecrets(ctx context.Context, in *SearchSecr
 // All implementations must embed UnimplementedSecretsServiceServer
 // for forward compatibility.
 //
-// SecretsService handles CRUD operations for secrets
+// SecretsService handles CRUD operations for encrypted secrets.
+//
+// All secrets are encrypted client-side using AES-256-GCM before being sent to the server.
+// The server stores only encrypted blobs and metadata, never having access to plaintext data.
+// All endpoints require authentication via Bearer token in Authorization header.
 type SecretsServiceServer interface {
-	// CreateSecret creates a new secret
+	// CreateSecret creates a new encrypted secret.
+	//
+	// The encrypted_data field should contain the AES-256-GCM encrypted payload,
+	// base64-encoded. The encryption key is derived from the user's master password
+	// on the client side and never sent to the server.
+	//
+	// Requires: Authorization header with valid access token.
 	CreateSecret(context.Context, *CreateSecretRequest) (*CreateSecretResponse, error)
-	// GetSecret retrieves a specific secret by ID
+	// GetSecret retrieves a specific secret by ID.
+	//
+	// Returns the encrypted secret data. Decryption must be performed client-side
+	// using the encryption key derived from the user's master password.
+	//
+	// Requires: Authorization header with valid access token.
 	GetSecret(context.Context, *GetSecretRequest) (*GetSecretResponse, error)
-	// UpdateSecret updates an existing secret
+	// UpdateSecret updates an existing secret.
+	//
+	// Uses optimistic locking via the version field to prevent concurrent modification conflicts.
+	// If the version doesn't match the current server version, the update will fail.
+	//
+	// Requires: Authorization header with valid access token.
 	UpdateSecret(context.Context, *UpdateSecretRequest) (*UpdateSecretResponse, error)
-	// DeleteSecret soft-deletes a secret
+	// DeleteSecret soft-deletes a secret.
+	//
+	// Secrets are soft-deleted (marked as deleted but not removed from database)
+	// to support synchronization with offline clients. Tombstone cleanup happens
+	// automatically after 30 days.
+	//
+	// Requires: Authorization header with valid access token.
 	DeleteSecret(context.Context, *DeleteSecretRequest) (*DeleteSecretResponse, error)
-	// ListSecrets retrieves all secrets for the authenticated user
+	// ListSecrets retrieves all secrets for the authenticated user.
+	//
+	// Supports filtering by type and category, with pagination for large result sets.
+	// By default, soft-deleted secrets are excluded unless explicitly requested.
+	//
+	// Requires: Authorization header with valid access token.
 	ListSecrets(context.Context, *ListSecretsRequest) (*ListSecretsResponse, error)
-	// SearchSecrets searches secrets by title, tags, or category
+	// SearchSecrets searches secrets by title, tags, or category.
+	//
+	// Performs server-side search on unencrypted metadata fields only.
+	// For searching encrypted content, decryption and search must be done client-side.
+	//
+	// Requires: Authorization header with valid access token.
 	SearchSecrets(context.Context, *SearchSecretsRequest) (*SearchSecretsResponse, error)
 	mustEmbedUnimplementedSecretsServiceServer()
 }

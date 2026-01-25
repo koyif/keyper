@@ -24,8 +24,10 @@ const (
 var (
 	// UnauthenticatedMethods are gRPC methods that don't require authentication.
 	UnauthenticatedMethods = map[string]bool{
-		"/keyper.api.v1.AuthService/Register": true,
-		"/keyper.api.v1.AuthService/Login":    true,
+		"/keyper.api.v1.AuthService/Register":     true,
+		"/keyper.api.v1.AuthService/Login":        true,
+		"/keyper.api.v1.AuthService/RefreshToken": true,
+		"/keyper.api.v1.AuthService/Logout":       true,
 	}
 )
 

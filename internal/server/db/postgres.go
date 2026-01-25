@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // Config holds PostgreSQL database configuration.
@@ -103,10 +107,18 @@ func NewPool(ctx context.Context, cfg *Config) (*Pool, error) {
 		return nil, fmt.Errorf("failed to connect to database after %d retries: %w", maxRetries, err)
 	}
 
-	return &Pool{
+	p := &Pool{
 		Pool:   pool,
 		config: cfg,
-	}, nil
+	}
+
+	// Run migrations.
+	if err := p.runMigrations(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	return p, nil
 }
 
 // Health performs a health check on the database connection.
@@ -129,4 +141,48 @@ func (p *Pool) Stats() *pgxpool.Stat {
 // Close closes all connections in the pool.
 func (p *Pool) Close() {
 	p.Pool.Close()
+}
+
+// runMigrations executes database migrations.
+func (p *Pool) runMigrations(ctx context.Context) error {
+	// Register pgx driver with database/sql.
+	db := stdlib.OpenDB(*p.Pool.Config().ConnConfig)
+	defer db.Close()
+
+	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to create migration driver: %w", err)
+	}
+
+	// Migrations are expected to be in the migrations/ directory.
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://migrations",
+		"postgres",
+		driver,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create migrate instance: %w", err)
+	}
+	defer m.Close()
+
+	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	version, dirty, err := m.Version()
+	if err != nil && err != migrate.ErrNilVersion {
+		return fmt.Errorf("failed to get migration version: %w", err)
+	}
+
+	if dirty {
+		return fmt.Errorf("database is in dirty state at version %d", version)
+	}
+
+	if err == migrate.ErrNilVersion {
+		fmt.Println("Database migrations completed successfully (no migrations found)")
+	} else {
+		fmt.Printf("Database migrations completed successfully (version: %d)\n", version)
+	}
+
+	return nil
 }

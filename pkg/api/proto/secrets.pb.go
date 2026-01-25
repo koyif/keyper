@@ -7,6 +7,7 @@
 package proto
 
 import (
+	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -727,7 +728,7 @@ var File_secrets_proto protoreflect.FileDescriptor
 
 const file_secrets_proto_rawDesc = "" +
 	"\n" +
-	"\rsecrets.proto\x12\rkeyper.api.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\fmodels.proto\"\xb6\x01\n" +
+	"\rsecrets.proto\x12\rkeyper.api.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\fmodels.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"\xb6\x01\n" +
 	"\x13CreateSecretRequest\x12-\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x19.keyper.api.v1.SecretTypeR\x04type\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12%\n" +
@@ -774,14 +775,14 @@ const file_secrets_proto_rawDesc = "" +
 	"\x15SearchSecretsResponse\x12/\n" +
 	"\asecrets\x18\x01 \x03(\v2\x15.keyper.api.v1.SecretR\asecrets\x12\x1f\n" +
 	"\vtotal_count\x18\x02 \x01(\x05R\n" +
-	"totalCount2\xcc\x05\n" +
+	"totalCount2\xe5\x06\n" +
 	"\x0eSecretsService\x12o\n" +
 	"\fCreateSecret\x12\".keyper.api.v1.CreateSecretRequest\x1a#.keyper.api.v1.CreateSecretResponse\"\x16\x82\xd3\xe4\x93\x02\x10:\x01*\"\v/v1/secrets\x12o\n" +
 	"\tGetSecret\x12\x1f.keyper.api.v1.GetSecretRequest\x1a .keyper.api.v1.GetSecretResponse\"\x1f\x82\xd3\xe4\x93\x02\x19\x12\x17/v1/secrets/{secret_id}\x12{\n" +
 	"\fUpdateSecret\x12\".keyper.api.v1.UpdateSecretRequest\x1a#.keyper.api.v1.UpdateSecretResponse\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\x1a\x17/v1/secrets/{secret_id}\x12x\n" +
 	"\fDeleteSecret\x12\".keyper.api.v1.DeleteSecretRequest\x1a#.keyper.api.v1.DeleteSecretResponse\"\x1f\x82\xd3\xe4\x93\x02\x19*\x17/v1/secrets/{secret_id}\x12i\n" +
 	"\vListSecrets\x12!.keyper.api.v1.ListSecretsRequest\x1a\".keyper.api.v1.ListSecretsResponse\"\x13\x82\xd3\xe4\x93\x02\r\x12\v/v1/secrets\x12v\n" +
-	"\rSearchSecrets\x12#.keyper.api.v1.SearchSecretsRequest\x1a$.keyper.api.v1.SearchSecretsResponse\"\x1a\x82\xd3\xe4\x93\x02\x14\x12\x12/v1/secrets/searchB-Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
+	"\rSearchSecrets\x12#.keyper.api.v1.SearchSecretsRequest\x1a$.keyper.api.v1.SearchSecretsResponse\"\x1a\x82\xd3\xe4\x93\x02\x14\x12\x12/v1/secrets/search\x1a\x96\x01\x92A\x92\x01\x12\x8f\x01CRUD operations for encrypted secrets. All endpoints require authentication. Secrets are encrypted client-side using AES-256-GCM before upload.B-Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
 
 var (
 	file_secrets_proto_rawDescOnce sync.Once

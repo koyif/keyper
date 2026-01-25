@@ -28,13 +28,37 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// SyncService handles synchronization between client and server
+// SyncService handles bidirectional synchronization between client and server.
+//
+// Implements an offline-first architecture where clients can work without network
+// connectivity and sync changes when connection is restored. Uses version vectors
+// for conflict detection and resolution.
+//
+// All endpoints require authentication via Bearer token in Authorization header.
 type SyncServiceClient interface {
-	// Pull retrieves changes from the server since last sync
+	// Pull retrieves changes from the server since last sync.
+	//
+	// Returns all secrets that have been created, modified, or deleted on the server
+	// since the client's last sync version. Includes conflict detection when both
+	// client and server have modified the same secret.
+	//
+	// Requires: Authorization header with valid access token.
 	Pull(ctx context.Context, in *PullRequest, opts ...grpc.CallOption) (*PullResponse, error)
-	// Push sends local changes to the server
+	// Push sends local changes to the server.
+	//
+	// Uploads secrets that were created, modified, or deleted while offline.
+	// Server validates version numbers and detects conflicts. If conflicts are found,
+	// they are returned in the response for client-side resolution.
+	//
+	// Requires: Authorization header with valid access token.
 	Push(ctx context.Context, in *PushRequest, opts ...grpc.CallOption) (*PushResponse, error)
-	// GetSyncStatus retrieves current sync status
+	// GetSyncStatus retrieves current sync status.
+	//
+	// Returns metadata about the current sync state including server version,
+	// last sync time, and number of pending changes. Useful for displaying
+	// sync status in the UI.
+	//
+	// Requires: Authorization header with valid access token.
 	GetSyncStatus(ctx context.Context, in *GetSyncStatusRequest, opts ...grpc.CallOption) (*GetSyncStatusResponse, error)
 }
 
@@ -80,13 +104,37 @@ func (c *syncServiceClient) GetSyncStatus(ctx context.Context, in *GetSyncStatus
 // All implementations must embed UnimplementedSyncServiceServer
 // for forward compatibility.
 //
-// SyncService handles synchronization between client and server
+// SyncService handles bidirectional synchronization between client and server.
+//
+// Implements an offline-first architecture where clients can work without network
+// connectivity and sync changes when connection is restored. Uses version vectors
+// for conflict detection and resolution.
+//
+// All endpoints require authentication via Bearer token in Authorization header.
 type SyncServiceServer interface {
-	// Pull retrieves changes from the server since last sync
+	// Pull retrieves changes from the server since last sync.
+	//
+	// Returns all secrets that have been created, modified, or deleted on the server
+	// since the client's last sync version. Includes conflict detection when both
+	// client and server have modified the same secret.
+	//
+	// Requires: Authorization header with valid access token.
 	Pull(context.Context, *PullRequest) (*PullResponse, error)
-	// Push sends local changes to the server
+	// Push sends local changes to the server.
+	//
+	// Uploads secrets that were created, modified, or deleted while offline.
+	// Server validates version numbers and detects conflicts. If conflicts are found,
+	// they are returned in the response for client-side resolution.
+	//
+	// Requires: Authorization header with valid access token.
 	Push(context.Context, *PushRequest) (*PushResponse, error)
-	// GetSyncStatus retrieves current sync status
+	// GetSyncStatus retrieves current sync status.
+	//
+	// Returns metadata about the current sync state including server version,
+	// last sync time, and number of pending changes. Useful for displaying
+	// sync status in the UI.
+	//
+	// Requires: Authorization header with valid access token.
 	GetSyncStatus(context.Context, *GetSyncStatusRequest) (*GetSyncStatusResponse, error)
 	mustEmbedUnimplementedSyncServiceServer()
 }

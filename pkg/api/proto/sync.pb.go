@@ -7,6 +7,7 @@
 package proto
 
 import (
+	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -543,7 +544,7 @@ var File_sync_proto protoreflect.FileDescriptor
 const file_sync_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"sync.proto\x12\rkeyper.api.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\fmodels.proto\"{\n" +
+	"sync.proto\x12\rkeyper.api.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\fmodels.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"{\n" +
 	"\vPullRequest\x12*\n" +
 	"\x11last_sync_version\x18\x01 \x01(\x03R\x0flastSyncVersion\x12@\n" +
 	"\x0elast_sync_time\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\flastSyncTime\"\xab\x02\n" +
@@ -582,11 +583,11 @@ const file_sync_proto_rawDesc = "" +
 	"\x1fCONFLICT_TYPE_MODIFIED_MODIFIED\x10\x01\x12\"\n" +
 	"\x1eCONFLICT_TYPE_MODIFIED_DELETED\x10\x02\x12\"\n" +
 	"\x1eCONFLICT_TYPE_DELETED_MODIFIED\x10\x03\x12\"\n" +
-	"\x1eCONFLICT_TYPE_VERSION_MISMATCH\x10\x042\xb8\x02\n" +
+	"\x1eCONFLICT_TYPE_VERSION_MISMATCH\x10\x042\xd6\x03\n" +
 	"\vSyncService\x12Y\n" +
 	"\x04Pull\x12\x1a.keyper.api.v1.PullRequest\x1a\x1b.keyper.api.v1.PullResponse\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/v1/sync/pull\x12Y\n" +
 	"\x04Push\x12\x1a.keyper.api.v1.PushRequest\x1a\x1b.keyper.api.v1.PushResponse\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/v1/sync/push\x12s\n" +
-	"\rGetSyncStatus\x12#.keyper.api.v1.GetSyncStatusRequest\x1a$.keyper.api.v1.GetSyncStatusResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/sync/statusB-Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
+	"\rGetSyncStatus\x12#.keyper.api.v1.GetSyncStatusRequest\x1a$.keyper.api.v1.GetSyncStatusResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/sync/status\x1a\x9b\x01\x92A\x97\x01\x12\x94\x01Bidirectional synchronization for offline-first clients. All endpoints require authentication. Supports automatic conflict detection and resolution.B-Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
 
 var (
 	file_sync_proto_rawDescOnce sync.Once

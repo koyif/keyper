@@ -7,6 +7,7 @@
 package proto
 
 import (
+	_ "github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2/options"
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -23,14 +24,17 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// RegisterRequest contains user registration information
+// RegisterRequest contains user registration information.
 type RegisterRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Username       string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
-	MasterPassword string                 `protobuf:"bytes,2,opt,name=master_password,json=masterPassword,proto3" json:"master_password,omitempty"`
-	DeviceInfo     string                 `protobuf:"bytes,3,opt,name=device_info,json=deviceInfo,proto3" json:"device_info,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Unique username for the account (3-50 characters, alphanumeric and underscore only)
+	Username string `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	// Argon2id-derived authentication hash (never the raw password)
+	MasterPassword string `protobuf:"bytes,2,opt,name=master_password,json=masterPassword,proto3" json:"master_password,omitempty"`
+	// Optional device information for session tracking (e.g., "Chrome on macOS")
+	DeviceInfo    string `protobuf:"bytes,3,opt,name=device_info,json=deviceInfo,proto3" json:"device_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RegisterRequest) Reset() {
@@ -84,14 +88,19 @@ func (x *RegisterRequest) GetDeviceInfo() string {
 	return ""
 }
 
-// RegisterResponse contains registration result
+// RegisterResponse contains registration result.
 type RegisterResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	AccessToken   string                 `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
-	RefreshToken  string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
-	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Unique user identifier (UUID)
+	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// JWT access token (15 minute expiry) - use in Authorization header as "Bearer <token>"
+	AccessToken string `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
+	// Refresh token (30 day expiry) - use to obtain new access tokens
+	RefreshToken string `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	// Access token expiration timestamp
+	ExpiresAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	// Human-readable success message
+	Message       string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -161,14 +170,17 @@ func (x *RegisterResponse) GetMessage() string {
 	return ""
 }
 
-// LoginRequest contains user login credentials
+// LoginRequest contains user login credentials.
 type LoginRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Username       string                 `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
-	MasterPassword string                 `protobuf:"bytes,2,opt,name=master_password,json=masterPassword,proto3" json:"master_password,omitempty"`
-	DeviceInfo     string                 `protobuf:"bytes,3,opt,name=device_info,json=deviceInfo,proto3" json:"device_info,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Username for the account
+	Username string `protobuf:"bytes,1,opt,name=username,proto3" json:"username,omitempty"`
+	// Argon2id-derived authentication hash (never the raw password)
+	MasterPassword string `protobuf:"bytes,2,opt,name=master_password,json=masterPassword,proto3" json:"master_password,omitempty"`
+	// Optional device information for session tracking (e.g., "Chrome on macOS")
+	DeviceInfo    string `protobuf:"bytes,3,opt,name=device_info,json=deviceInfo,proto3" json:"device_info,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LoginRequest) Reset() {
@@ -222,14 +234,19 @@ func (x *LoginRequest) GetDeviceInfo() string {
 	return ""
 }
 
-// LoginResponse contains authentication tokens
+// LoginResponse contains authentication tokens.
 type LoginResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	AccessToken   string                 `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
-	RefreshToken  string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
-	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	Message       string                 `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Unique user identifier (UUID)
+	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	// JWT access token (15 minute expiry) - use in Authorization header as "Bearer <token>"
+	AccessToken string `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
+	// Refresh token (30 day expiry) - use to obtain new access tokens
+	RefreshToken string `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	// Access token expiration timestamp
+	ExpiresAt *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	// Human-readable success message
+	Message       string `protobuf:"bytes,5,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -299,10 +316,11 @@ func (x *LoginResponse) GetMessage() string {
 	return ""
 }
 
-// RefreshTokenRequest contains the refresh token
+// RefreshTokenRequest contains the refresh token.
 type RefreshTokenRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RefreshToken  string                 `protobuf:"bytes,1,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Valid refresh token obtained from login or registration
+	RefreshToken  string `protobuf:"bytes,1,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -344,12 +362,15 @@ func (x *RefreshTokenRequest) GetRefreshToken() string {
 	return ""
 }
 
-// RefreshTokenResponse contains a new access token
+// RefreshTokenResponse contains a new access token.
 type RefreshTokenResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AccessToken   string                 `protobuf:"bytes,1,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
-	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// New JWT access token (15 minute expiry)
+	AccessToken string `protobuf:"bytes,1,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
+	// New access token expiration timestamp
+	ExpiresAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	// Human-readable success message
+	Message       string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -405,10 +426,11 @@ func (x *RefreshTokenResponse) GetMessage() string {
 	return ""
 }
 
-// LogoutRequest contains the refresh token to revoke
+// LogoutRequest contains the refresh token to revoke.
 type LogoutRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RefreshToken  string                 `protobuf:"bytes,1,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Refresh token to invalidate
+	RefreshToken  string `protobuf:"bytes,1,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -450,10 +472,11 @@ func (x *LogoutRequest) GetRefreshToken() string {
 	return ""
 }
 
-// LogoutResponse confirms logout
+// LogoutResponse confirms logout.
 type LogoutResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Message       string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Human-readable confirmation message
+	Message       string `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -495,11 +518,13 @@ func (x *LogoutResponse) GetMessage() string {
 	return ""
 }
 
-// ChangePasswordRequest contains old and new passwords
+// ChangePasswordRequest contains old and new passwords.
 type ChangePasswordRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	OldPassword   string                 `protobuf:"bytes,1,opt,name=old_password,json=oldPassword,proto3" json:"old_password,omitempty"`
-	NewPassword   string                 `protobuf:"bytes,2,opt,name=new_password,json=newPassword,proto3" json:"new_password,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Current Argon2id-derived authentication hash
+	OldPassword string `protobuf:"bytes,1,opt,name=old_password,json=oldPassword,proto3" json:"old_password,omitempty"`
+	// New Argon2id-derived authentication hash
+	NewPassword   string `protobuf:"bytes,2,opt,name=new_password,json=newPassword,proto3" json:"new_password,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -548,13 +573,16 @@ func (x *ChangePasswordRequest) GetNewPassword() string {
 	return ""
 }
 
-// ChangePasswordResponse confirms password change
+// ChangePasswordResponse confirms password change.
 type ChangePasswordResponse struct {
-	state   protoimpl.MessageState `protogen:"open.v1"`
-	Message string                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	// New tokens after password change (re-encryption required)
-	AccessToken   string                 `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
-	RefreshToken  string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Human-readable confirmation message
+	Message string `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
+	// New JWT access token (15 minute expiry) - old tokens are invalidated
+	AccessToken string `protobuf:"bytes,2,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
+	// New refresh token (30 day expiry)
+	RefreshToken string `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	// New access token expiration timestamp
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -623,7 +651,7 @@ var File_auth_proto protoreflect.FileDescriptor
 const file_auth_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"auth.proto\x12\rkeyper.api.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"w\n" +
+	"auth.proto\x12\rkeyper.api.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a.protoc-gen-openapiv2/options/annotations.proto\"w\n" +
 	"\x0fRegisterRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12'\n" +
 	"\x0fmaster_password\x18\x02 \x01(\tR\x0emasterPassword\x12\x1f\n" +
@@ -667,13 +695,49 @@ const file_auth_proto_rawDesc = "" +
 	"\faccess_token\x18\x02 \x01(\tR\vaccessToken\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x129\n" +
 	"\n" +
-	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt2\xb5\x04\n" +
+	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt2\xf4\x05\n" +
 	"\vAuthService\x12i\n" +
 	"\bRegister\x12\x1e.keyper.api.v1.RegisterRequest\x1a\x1f.keyper.api.v1.RegisterResponse\"\x1c\x82\xd3\xe4\x93\x02\x16:\x01*\"\x11/v1/auth/register\x12]\n" +
 	"\x05Login\x12\x1b.keyper.api.v1.LoginRequest\x1a\x1c.keyper.api.v1.LoginResponse\"\x19\x82\xd3\xe4\x93\x02\x13:\x01*\"\x0e/v1/auth/login\x12t\n" +
 	"\fRefreshToken\x12\".keyper.api.v1.RefreshTokenRequest\x1a#.keyper.api.v1.RefreshTokenResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/auth/refresh\x12a\n" +
 	"\x06Logout\x12\x1c.keyper.api.v1.LogoutRequest\x1a\x1d.keyper.api.v1.LogoutResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/auth/logout\x12\x82\x01\n" +
-	"\x0eChangePassword\x12$.keyper.api.v1.ChangePasswordRequest\x1a%.keyper.api.v1.ChangePasswordResponse\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/auth/change-passwordB-Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
+	"\x0eChangePassword\x12$.keyper.api.v1.ChangePasswordRequest\x1a%.keyper.api.v1.ChangePasswordResponse\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/auth/change-password\x1a\xbc\x01\x92A\xb8\x01\x12\xb5\x01User authentication and session management endpoints. Register and login do not require authentication. All other endpoints require a valid access token in the Authorization header.B\xf9\v\x92A\xc8\v\x12\xb7\n" +
+	"\n" +
+	"\n" +
+	"Keyper API\x12\xb6\tEnd-to-end encrypted password manager API\n" +
+	"\n" +
+	"## Overview\n" +
+	"Keyper is a secure password manager with client-side encryption. All secrets are encrypted using AES-256-GCM before being sent to the server, ensuring that the server never has access to plaintext data.\n" +
+	"\n" +
+	"## Authentication\n" +
+	"Most endpoints require authentication. After logging in or registering, include the access token in the Authorization header:\n" +
+	"\n" +
+	"```\n" +
+	"Authorization: Bearer <access_token>\n" +
+	"```\n" +
+	"\n" +
+	"Access tokens expire after 15 minutes. Use the refresh token endpoint to obtain a new access token without requiring the user to log in again.\n" +
+	"\n" +
+	"## Encryption\n" +
+	"- **Master Password**: Never sent to server, used to derive two keys:\n" +
+	"  - Authentication Hash: Argon2id-derived, sent to server for authentication\n" +
+	"  - Encryption Key: Derived locally, used for AES-256-GCM encryption\n" +
+	"- **Secret Data**: All secret data is encrypted client-side before upload\n" +
+	"- **Zero-Knowledge**: Server stores only encrypted blobs\n" +
+	"\n" +
+	"## Offline-First Sync\n" +
+	"Keyper supports offline-first operation with automatic conflict resolution:\n" +
+	"- Clients can work without network connectivity\n" +
+	"- Changes sync automatically when connection is restored\n" +
+	"- Version vectors detect and resolve conflicts\n" +
+	"\"5\n" +
+	"\x12Keyper API Support\x12\x1fhttps://github.com/koyif/keyper*2\n" +
+	"\vMIT License\x12#https://opensource.org/licenses/MIT2\x051.0.0*\x02\x02\x012\x10application/json:\x10application/jsonZV\n" +
+	"T\n" +
+	"\x06Bearer\x12J\b\x02\x125Enter your access token in the format: Bearer <token>\x1a\rAuthorization \x02b\f\n" +
+	"\n" +
+	"\n" +
+	"\x06Bearer\x12\x00Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
 
 var (
 	file_auth_proto_rawDescOnce sync.Once

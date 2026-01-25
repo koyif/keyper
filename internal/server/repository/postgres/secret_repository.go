@@ -290,3 +290,33 @@ func (r *SecretRepository) ListModifiedSince(ctx context.Context, userID uuid.UU
 
 	return secrets, nil
 }
+
+// HardDeleteTombstones permanently removes soft-deleted secrets older than the specified time.
+// This is used by the background cleanup job to purge tombstones after the retention period.
+// Deletes in batches to avoid long-running transactions and excessive table locks.
+// Returns the number of records deleted.
+func (r *SecretRepository) HardDeleteTombstones(ctx context.Context, olderThan time.Time, batchSize int) (int, error) {
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+
+	query := `
+		DELETE FROM secrets
+		WHERE id IN (
+			SELECT id
+			FROM secrets
+			WHERE is_deleted = true AND updated_at < $1
+			ORDER BY updated_at ASC
+			LIMIT $2
+		)
+	`
+
+	q := getQuerier(ctx, r.pool)
+	result, err := q.Exec(ctx, query, olderThan, batchSize)
+	if err != nil {
+		return 0, fmt.Errorf("failed to hard delete tombstones: %w", err)
+	}
+
+	deletedCount := int(result.RowsAffected())
+	return deletedCount, nil
+}

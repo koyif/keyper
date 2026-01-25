@@ -7,10 +7,27 @@ option go_package = "github.com/koyif/keyper/pkg/api/proto;proto";
 import "google/api/annotations.proto";
 import "google/protobuf/timestamp.proto";
 import "models.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
 
-// SyncService handles synchronization between client and server
+// SyncService handles bidirectional synchronization between client and server.
+//
+// Implements an offline-first architecture where clients can work without network
+// connectivity and sync changes when connection is restored. Uses version vectors
+// for conflict detection and resolution.
+//
+// All endpoints require authentication via Bearer token in Authorization header.
 service SyncService {
-  // Pull retrieves changes from the server since last sync
+  option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_tag) = {
+    description: "Bidirectional synchronization for offline-first clients. "
+                 "All endpoints require authentication. Supports automatic conflict detection and resolution."
+  };
+  // Pull retrieves changes from the server since last sync.
+  //
+  // Returns all secrets that have been created, modified, or deleted on the server
+  // since the client's last sync version. Includes conflict detection when both
+  // client and server have modified the same secret.
+  //
+  // Requires: Authorization header with valid access token.
   rpc Pull(PullRequest) returns (PullResponse) {
     option (google.api.http) = {
       post: "/v1/sync/pull"
@@ -18,7 +35,13 @@ service SyncService {
     };
   }
 
-  // Push sends local changes to the server
+  // Push sends local changes to the server.
+  //
+  // Uploads secrets that were created, modified, or deleted while offline.
+  // Server validates version numbers and detects conflicts. If conflicts are found,
+  // they are returned in the response for client-side resolution.
+  //
+  // Requires: Authorization header with valid access token.
   rpc Push(PushRequest) returns (PushResponse) {
     option (google.api.http) = {
       post: "/v1/sync/push"
@@ -26,7 +49,13 @@ service SyncService {
     };
   }
 
-  // GetSyncStatus retrieves current sync status
+  // GetSyncStatus retrieves current sync status.
+  //
+  // Returns metadata about the current sync state including server version,
+  // last sync time, and number of pending changes. Useful for displaying
+  // sync status in the UI.
+  //
+  // Requires: Authorization header with valid access token.
   rpc GetSyncStatus(GetSyncStatusRequest) returns (GetSyncStatusResponse) {
     option (google.api.http) = {
       get: "/v1/sync/status"

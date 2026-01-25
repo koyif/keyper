@@ -49,21 +49,24 @@ help: ## Show this help message
 proto: ## Generate Go code and OpenAPI spec from proto files
 	@echo "Generating protobuf code..."
 	@mkdir -p $(OPENAPI_OUT_DIR)
-	@for proto in $(PROTO_FILES); do \
-		echo "Processing $$proto"; \
-		$(PROTOC) \
-			--proto_path=$(PROTO_DIR) \
-			--proto_path=$(GOOGLEAPIS_DIR) \
-			--go_out=$(PROTO_OUT_DIR) \
-			--go_opt=paths=source_relative \
-			--go-grpc_out=$(PROTO_OUT_DIR) \
-			--go-grpc_opt=paths=source_relative \
-			--grpc-gateway_out=$(PROTO_OUT_DIR) \
-			--grpc-gateway_opt=paths=source_relative \
-			--grpc-gateway_opt=generate_unbound_methods=true \
-			--openapiv2_out=$(OPENAPI_OUT_DIR) \
-			--openapiv2_opt=allow_merge=true,merge_file_name=keyper \
-			$$proto; \
+	@# Process proto files in specific order: models first, then services, auth last (for OpenAPI merge)
+	@for proto in $(PROTO_DIR)/models.proto $(PROTO_DIR)/secrets.proto $(PROTO_DIR)/sync.proto $(PROTO_DIR)/auth.proto; do \
+		if [ -f "$$proto" ]; then \
+			echo "Processing $$proto"; \
+			$(PROTOC) \
+				--proto_path=$(PROTO_DIR) \
+				--proto_path=$(GOOGLEAPIS_DIR) \
+				--go_out=$(PROTO_OUT_DIR) \
+				--go_opt=paths=source_relative \
+				--go-grpc_out=$(PROTO_OUT_DIR) \
+				--go-grpc_opt=paths=source_relative \
+				--grpc-gateway_out=$(PROTO_OUT_DIR) \
+				--grpc-gateway_opt=paths=source_relative \
+				--grpc-gateway_opt=generate_unbound_methods=true \
+				--openapiv2_out=$(OPENAPI_OUT_DIR) \
+				--openapiv2_opt=allow_merge=true,merge_file_name=keyper \
+				$$proto; \
+		fi; \
 	done
 	@echo "Protobuf code generation complete!"
 
