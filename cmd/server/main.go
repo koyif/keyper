@@ -13,8 +13,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/koyif/keyper/internal/database"
 	"google.golang.org/grpc"
+
+	"github.com/koyif/keyper/internal/database"
+	"github.com/koyif/keyper/internal/server/auth"
 )
 
 var (
@@ -46,7 +48,19 @@ func main() {
 
 	log.Println("Database initialized successfully")
 
-	grpcServer := grpc.NewServer()
+	// Initialize JWT manager
+	jwtManager := auth.NewJWTManager(cfg.Auth.JWTSecret)
+	log.Println("JWT manager initialized")
+
+	// Initialize token blacklist with 1 hour cleanup interval
+	tokenBlacklist := auth.NewTokenBlacklist(1 * time.Hour)
+	defer tokenBlacklist.Stop()
+	log.Println("Token blacklist initialized")
+
+	// Create gRPC server with authentication interceptor (with blacklist support)
+	grpcServer := grpc.NewServer(
+		grpc.UnaryInterceptor(auth.UnaryAuthInterceptorWithBlacklist(jwtManager, tokenBlacklist)),
+	)
 
 	// TODO: Register gRPC services here
 	// pb.RegisterAuthServiceServer(grpcServer, authService)
@@ -91,20 +105,31 @@ func main() {
 	}
 }
 
-// Config holds application configuration
+// Config holds application configuration.
 type Config struct {
 	Server   ServerConfig
 	Database database.Config
+	Auth     AuthConfig
 }
 
-// ServerConfig holds server configuration
+// ServerConfig holds server configuration.
 type ServerConfig struct {
 	Host string
 	Port int
 }
 
-// loadConfig loads configuration from environment variables
+// AuthConfig holds authentication configuration.
+type AuthConfig struct {
+	JWTSecret string
+}
+
+// loadConfig loads configuration from environment variables.
 func loadConfig() Config {
+	jwtSecret := getEnv("JWT_SECRET", "")
+	if jwtSecret == "" {
+		log.Fatal("JWT_SECRET environment variable is required")
+	}
+
 	return Config{
 		Server: ServerConfig{
 			Host: getEnv("SERVER_HOST", "localhost"),
@@ -118,10 +143,13 @@ func loadConfig() Config {
 			Database: getEnv("POSTGRES_DB", "keyper"),
 			SSLMode:  getEnv("POSTGRES_SSL_MODE", "disable"),
 		},
+		Auth: AuthConfig{
+			JWTSecret: jwtSecret,
+		},
 	}
 }
 
-// getEnv retrieves an environment variable or returns a default value
+// getEnv retrieves an environment variable or returns a default value.
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -129,7 +157,7 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// getEnvInt retrieves an integer environment variable or returns a default value
+// getEnvInt retrieves an integer environment variable or returns a default value.
 func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
@@ -139,7 +167,7 @@ func getEnvInt(key string, defaultValue int) int {
 	return defaultValue
 }
 
-// printVersion prints version information
+// printVersion prints version information.
 func printVersion() {
 	fmt.Printf("Keyper Server\n")
 	fmt.Printf("Version:    %s\n", version)

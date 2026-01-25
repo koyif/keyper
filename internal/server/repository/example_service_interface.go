@@ -48,7 +48,7 @@ type syncSecretRepository interface {
 // Example: TokenService interface.
 //
 //nolint:unused // example interface for documentation
-type refreshTokenRepository interface {
+type exampleRefreshTokenRepository interface {
 	Create(ctx context.Context, userID uuid.UUID, tokenHash []byte, deviceID *string, expiresAt time.Time) (*RefreshToken, error)
 	GetByTokenHash(ctx context.Context, tokenHash []byte) (*RefreshToken, error)
 	DeleteByID(ctx context.Context, id uuid.UUID) error
@@ -57,7 +57,7 @@ type refreshTokenRepository interface {
 // Example: A background cleanup job might only need this.
 //
 //nolint:unused // example interface for documentation
-type tokenCleanupRepository interface {
+type exampleTokenCleanupRepository interface {
 	DeleteExpired(ctx context.Context) (int64, error)
 }
 
