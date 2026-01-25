@@ -57,3 +57,5 @@ node_modules/
 
 # Linter schema (can be regenerated)
 .golangci.schema.json
+
+/dist/

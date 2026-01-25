@@ -6,9 +6,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/koy/keyper/internal/client/config"
-	"github.com/koy/keyper/internal/client/session"
-	"github.com/koy/keyper/internal/client/storage"
+	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/session"
+	"github.com/koyif/keyper/internal/client/storage"
 )
 
 // SyncResult contains statistics and information about a sync operation.
@@ -121,9 +121,12 @@ func Sync(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 		cfg.ManualConflictResolution = false // Use last-write-wins which will favor server
 		reportProgress("Force server wins enabled: conflicts will be resolved with server version")
 	}
+	// Use defer to ensure setting is restored even if PullAndSync panics or returns early
+	defer func() {
+		cfg.ManualConflictResolution = origManualConflict
+	}()
 
 	pullErr := PullAndSync(ctx, cfg, sess, repo)
-	cfg.ManualConflictResolution = origManualConflict // Restore original setting
 
 	result.PullDuration = time.Since(pullStart)
 

@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/koy/keyper/internal/client/config"
-	"github.com/koy/keyper/internal/client/session"
-	"github.com/koy/keyper/internal/client/storage"
-	pb "github.com/koy/keyper/pkg/api/proto"
+	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/session"
+	"github.com/koyif/keyper/internal/client/storage"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 )
 
 // mockRepository implements the storage.Repository interface for testing

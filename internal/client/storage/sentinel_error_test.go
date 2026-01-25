@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	pb "github.com/koy/keyper/pkg/api/proto"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 )
 
 // Compile-time check to ensure SQLiteRepository implements Repository interface

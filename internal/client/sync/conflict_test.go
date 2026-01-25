@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/koy/keyper/internal/client/config"
-	"github.com/koy/keyper/internal/client/storage"
-	pb "github.com/koy/keyper/pkg/api/proto"
+	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/storage"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 )
 
 // TestMergeToLocalDB_ConflictDetection_VersionMismatchWithPendingChanges tests that

@@ -8,10 +8,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/koy/keyper/internal/client/config"
-	"github.com/koy/keyper/internal/client/session"
-	"github.com/koy/keyper/internal/client/storage"
-	"github.com/koy/keyper/internal/crypto"
+	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/session"
+	"github.com/koyif/keyper/internal/client/storage"
+	"github.com/koyif/keyper/internal/crypto"
 )
 
 // SecretEditScreen represents the secret edit screen

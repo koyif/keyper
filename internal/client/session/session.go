@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	pb "github.com/koy/keyper/pkg/api/proto"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 	"google.golang.org/grpc"
 )
 
@@ -70,9 +70,7 @@ func (s *Session) Save() error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Ensure directory exists
 	dir := s.filePath
-	// Find last separator
 	for i := len(dir) - 1; i >= 0; i-- {
 		if dir[i] == '/' || dir[i] == '\\' {
 			dir = dir[:i]
@@ -90,7 +88,6 @@ func (s *Session) Save() error {
 		return fmt.Errorf("failed to marshal session: %w", err)
 	}
 
-	// Write with restrictive permissions
 	if err := os.WriteFile(s.filePath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write session file: %w", err)
 	}
@@ -103,7 +100,6 @@ func (s *Session) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Clear in-memory data
 	s.UserID = ""
 	s.AccessToken = ""
 	s.RefreshToken = ""
@@ -112,7 +108,6 @@ func (s *Session) Clear() error {
 	s.EncryptionKeyVerifier = ""
 	s.LastSyncAt = time.Time{}
 
-	// Remove session file
 	if err := os.Remove(s.filePath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove session file: %w", err)
 	}
@@ -182,14 +177,12 @@ func (s *Session) RefreshAccessToken(serverAddr string, opts ...grpc.DialOption)
 		return fmt.Errorf("no refresh token available")
 	}
 
-	// Connect to server
 	conn, err := grpc.NewClient(serverAddr, opts...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to server: %w", err)
 	}
 	defer conn.Close()
 
-	// Call RefreshToken RPC
 	client := pb.NewAuthServiceClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -201,7 +194,6 @@ func (s *Session) RefreshAccessToken(serverAddr string, opts ...grpc.DialOption)
 		return fmt.Errorf("token refresh failed: %w", err)
 	}
 
-	// Update tokens
 	s.mu.Lock()
 	s.AccessToken = resp.AccessToken
 	s.ExpiresAt = resp.ExpiresAt.AsTime()

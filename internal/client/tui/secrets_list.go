@@ -11,11 +11,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/koy/keyper/internal/client/config"
-	"github.com/koy/keyper/internal/client/session"
-	"github.com/koy/keyper/internal/client/storage"
-	"github.com/koy/keyper/internal/client/sync"
-	pb "github.com/koy/keyper/pkg/api/proto"
+	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/session"
+	"github.com/koyif/keyper/internal/client/storage"
+	"github.com/koyif/keyper/internal/client/sync"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 )
 
 // SecretsListScreen represents the secrets list screen

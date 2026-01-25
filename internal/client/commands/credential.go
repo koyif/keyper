@@ -8,11 +8,11 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
-	"github.com/koy/keyper/internal/client/config"
-	"github.com/koy/keyper/internal/client/session"
-	"github.com/koy/keyper/internal/client/storage"
-	"github.com/koy/keyper/internal/crypto"
-	pb "github.com/koy/keyper/pkg/api/proto"
+	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/session"
+	"github.com/koyif/keyper/internal/client/storage"
+	"github.com/koyif/keyper/internal/crypto"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -235,36 +235,16 @@ func newCredentialGetCmd(_ func() *config.Config, getSess func() *session.Sessio
 
 			ctx := context.Background()
 
-			// Try to get by ID first, then by name
-			var secret *storage.LocalSecret
-			secret, err = repo.Get(ctx, identifier)
+			// Get and validate secret
+			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_CREDENTIAL)
 			if err != nil {
-				// Try by name
-				secret, err = repo.GetByName(ctx, identifier)
-				if err != nil {
-					return fmt.Errorf("credential not found: %s", identifier)
-				}
-			}
-
-			// Check if deleted
-			if secret.IsDeleted {
-				return fmt.Errorf("credential has been deleted")
-			}
-
-			// Check type
-			if secret.Type != pb.SecretType_SECRET_TYPE_CREDENTIAL {
-				return fmt.Errorf("secret is not a credential (type: %s)", secret.Type)
+				return err
 			}
 
 			// Decrypt the data
-			encryptionKey := sess.GetEncryptionKey()
-			if encryptionKey == nil {
-				return fmt.Errorf("encryption key not found in session")
-			}
-
-			decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
+			decryptedData, err := decryptSecret(secret, sess)
 			if err != nil {
-				return fmt.Errorf("failed to decrypt credential: %w", err)
+				return err
 			}
 
 			// Unmarshal credential data
@@ -412,22 +392,10 @@ func newCredentialUpdateCmd(getCfg func() *config.Config, getSess func() *sessio
 
 			ctx := context.Background()
 
-			// Get existing secret
-			var secret *storage.LocalSecret
-			secret, err = repo.Get(ctx, identifier)
+			// Get and validate secret
+			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_CREDENTIAL)
 			if err != nil {
-				secret, err = repo.GetByName(ctx, identifier)
-				if err != nil {
-					return fmt.Errorf("credential not found: %s", identifier)
-				}
-			}
-
-			if secret.IsDeleted {
-				return fmt.Errorf("credential has been deleted")
-			}
-
-			if secret.Type != pb.SecretType_SECRET_TYPE_CREDENTIAL {
-				return fmt.Errorf("secret is not a credential")
+				return err
 			}
 
 			// Decrypt existing data
@@ -581,44 +549,21 @@ func newCredentialDeleteCmd(_ func() *config.Config, getSess func() *session.Ses
 
 			ctx := context.Background()
 
-			// Get secret to confirm
-			var secret *storage.LocalSecret
-			secret, err = repo.Get(ctx, identifier)
+			// Get and validate secret
+			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_CREDENTIAL)
 			if err != nil {
-				secret, err = repo.GetByName(ctx, identifier)
-				if err != nil {
-					return fmt.Errorf("credential not found: %s", identifier)
-				}
-			}
-
-			if secret.IsDeleted {
-				return fmt.Errorf("credential already deleted")
-			}
-
-			if secret.Type != pb.SecretType_SECRET_TYPE_CREDENTIAL {
-				return fmt.Errorf("secret is not a credential")
+				return err
 			}
 
 			// Confirm deletion
-			if !noConfirm {
-				var confirm bool
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewConfirm().
-							Title(fmt.Sprintf("Delete credential '%s'?", secret.Name)).
-							Description("This will mark the credential as deleted and sync to the server.").
-							Value(&confirm),
-					),
-				)
+			confirm, err := confirmDeletion(secret.Name, "credential", noConfirm)
+			if err != nil {
+				return err
+			}
 
-				if err := form.Run(); err != nil {
-					return fmt.Errorf("operation cancelled: %w", err)
-				}
-
-				if !confirm {
-					fmt.Println("Deletion cancelled")
-					return nil
-				}
+			if !confirm {
+				fmt.Println("Deletion cancelled")
+				return nil
 			}
 
 			// Delete (soft delete)

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	pb "github.com/koy/keyper/pkg/api/proto"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 )
 
 // TextFormatter formats data as human-readable text with color

@@ -2,26 +2,42 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
 
-	"github.com/koy/keyper/internal/database"
+	"github.com/koyif/keyper/internal/database"
 	"google.golang.org/grpc"
 )
 
-func main() {
-	log.Println("Starting Keyper server...")
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
 
-	// Load configuration from environment variables
+	showVersion = flag.Bool("version", false, "Show version information and exit")
+)
+
+func main() {
+	flag.Parse()
+
+	if *showVersion {
+		printVersion()
+		os.Exit(0)
+	}
+
+	log.Println("Starting Keyper server...")
+	log.Printf("Version: %s, Commit: %s, Build Date: %s", version, commit, buildDate)
+
 	cfg := loadConfig()
 
-	// Initialize database connection with auto-migrations
 	db, err := database.New(cfg.Database)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
@@ -30,7 +46,6 @@ func main() {
 
 	log.Println("Database initialized successfully")
 
-	// Create gRPC server
 	grpcServer := grpc.NewServer()
 
 	// TODO: Register gRPC services here
@@ -38,7 +53,6 @@ func main() {
 	// pb.RegisterSecretsServiceServer(grpcServer, secretsService)
 	// pb.RegisterSyncServiceServer(grpcServer, syncService)
 
-	// Start listening
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -47,21 +61,18 @@ func main() {
 
 	log.Printf("Server listening on %s", addr)
 
-	// Start server in a goroutine
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
 			log.Fatalf("Failed to serve: %v", err)
 		}
 	}()
 
-	// Wait for interrupt signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Println("Shutting down server...")
 
-	// Graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -126,4 +137,14 @@ func getEnvInt(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+// printVersion prints version information
+func printVersion() {
+	fmt.Printf("Keyper Server\n")
+	fmt.Printf("Version:    %s\n", version)
+	fmt.Printf("Commit:     %s\n", commit)
+	fmt.Printf("Build Date: %s\n", buildDate)
+	fmt.Printf("Go Version: %s\n", runtime.Version())
+	fmt.Printf("OS/Arch:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
 }

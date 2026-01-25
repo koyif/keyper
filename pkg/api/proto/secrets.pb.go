@@ -781,7 +781,7 @@ const file_secrets_proto_rawDesc = "" +
 	"\fUpdateSecret\x12\".keyper.api.v1.UpdateSecretRequest\x1a#.keyper.api.v1.UpdateSecretResponse\"\"\x82\xd3\xe4\x93\x02\x1c:\x01*\x1a\x17/v1/secrets/{secret_id}\x12x\n" +
 	"\fDeleteSecret\x12\".keyper.api.v1.DeleteSecretRequest\x1a#.keyper.api.v1.DeleteSecretResponse\"\x1f\x82\xd3\xe4\x93\x02\x19*\x17/v1/secrets/{secret_id}\x12i\n" +
 	"\vListSecrets\x12!.keyper.api.v1.ListSecretsRequest\x1a\".keyper.api.v1.ListSecretsResponse\"\x13\x82\xd3\xe4\x93\x02\r\x12\v/v1/secrets\x12v\n" +
-	"\rSearchSecrets\x12#.keyper.api.v1.SearchSecretsRequest\x1a$.keyper.api.v1.SearchSecretsResponse\"\x1a\x82\xd3\xe4\x93\x02\x14\x12\x12/v1/secrets/searchB+Z)github.com/koy/keyper/pkg/api/proto;protob\x06proto3"
+	"\rSearchSecrets\x12#.keyper.api.v1.SearchSecretsRequest\x1a$.keyper.api.v1.SearchSecretsResponse\"\x1a\x82\xd3\xe4\x93\x02\x14\x12\x12/v1/secrets/searchB-Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
 
 var (
 	file_secrets_proto_rawDescOnce sync.Once

@@ -80,54 +80,45 @@ func VerifyMasterPassword(masterPassword string, salt []byte, expectedHash []byt
 // GenerateEncryptionKeyVerifier creates a verifier value to confirm encryption key validity
 // This allows us to detect incorrect master passwords before attempting decryption
 func GenerateEncryptionKeyVerifier(encryptionKey []byte) (verifier string, salt []byte, err error) {
-	// Generate a random salt for the verifier (returned for storage, not used in encryption)
 	salt, err = GenerateSalt(VerifierSaltLength)
 	if err != nil {
 		return "", nil, err
 	}
 
-	// Generate a nonce for encryption
 	nonce, err := GenerateSalt(NonceSize)
 	if err != nil {
 		return "", nil, err
 	}
 
-	// Create a simple known plaintext
 	plaintext := []byte("keyper-encryption-key-verifier")
 
-	// Encrypt it with the encryption key
 	ciphertext, err := encryptAESGCM(plaintext, encryptionKey, nonce)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create verifier: %w", err)
 	}
 
-	// Return base64-encoded ciphertext as verifier
 	verifier = base64.StdEncoding.EncodeToString(ciphertext)
 	return verifier, salt, nil
 }
 
 // ValidateEncryptionKeyVerifier checks if an encryption key is valid by attempting to decrypt the verifier
 func ValidateEncryptionKeyVerifier(encryptionKey []byte, verifier string, salt []byte) error {
-	// Decode the verifier
 	ciphertext, err := base64.StdEncoding.DecodeString(verifier)
 	if err != nil {
 		return ErrInvalidVerifier
 	}
 
-	// Extract nonce from ciphertext
 	if len(ciphertext) < NonceSize {
 		return ErrInvalidVerifier
 	}
 
 	nonce := ciphertext[:NonceSize]
 
-	// Try to decrypt it
 	plaintext, err := decryptAESGCM(ciphertext, encryptionKey, nonce)
 	if err != nil {
 		return ErrInvalidMasterKey
 	}
 
-	// Verify the plaintext matches expected value
 	expected := []byte("keyper-encryption-key-verifier")
 	if subtle.ConstantTimeCompare(plaintext, expected) != 1 {
 		return ErrInvalidVerifier
@@ -139,7 +130,6 @@ func ValidateEncryptionKeyVerifier(encryptionKey []byte, verifier string, salt [
 // Encrypt encrypts plaintext using AES-256-GCM with the provided key
 // Returns base64-encoded ciphertext with nonce prepended
 func Encrypt(plaintext []byte, key []byte) (string, error) {
-	// Generate a unique nonce
 	nonce, err := GenerateSalt(NonceSize)
 	if err != nil {
 		return "", err
@@ -160,30 +150,13 @@ func Decrypt(ciphertextB64 string, key []byte) ([]byte, error) {
 		return nil, fmt.Errorf("invalid base64: %w", err)
 	}
 
-	// Extract nonce (first NonceSize bytes)
 	if len(ciphertext) < NonceSize {
 		return nil, ErrInvalidCiphertext
 	}
 
 	nonce := ciphertext[:NonceSize]
-	actualCiphertext := ciphertext[NonceSize:]
 
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cipher: %w", err)
-	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create GCM: %w", err)
-	}
-
-	plaintext, err := gcm.Open(nil, nonce, actualCiphertext, nil)
-	if err != nil {
-		return nil, ErrDecryptionFailed
-	}
-
-	return plaintext, nil
+	return decryptAESGCM(ciphertext, key, nonce)
 }
 
 // encryptAESGCM performs the actual AES-GCM encryption
@@ -199,7 +172,6 @@ func encryptAESGCM(plaintext []byte, key []byte, nonce []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	// Encrypt and prepend nonce to ciphertext
 	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
 	return ciphertext, nil
 }
@@ -221,7 +193,6 @@ func decryptAESGCM(ciphertext []byte, key []byte, nonce []byte) ([]byte, error) 
 		return nil, fmt.Errorf("failed to create GCM: %w", err)
 	}
 
-	// The ciphertext already has the nonce prepended, so extract actual ciphertext
 	actualCiphertext := ciphertext[NonceSize:]
 
 	plaintext, err := gcm.Open(nil, nonce, actualCiphertext, nil)

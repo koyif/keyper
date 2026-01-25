@@ -1,4 +1,15 @@
-.PHONY: proto proto-clean test test-crypto test-coverage build-server build-client build run-server clean help db-up db-down db-reset migrate-up migrate-down migrate-create migrate-status deps install-tools install-lint lint lint-fix
+.PHONY: proto proto-clean test test-crypto test-coverage build-server build-client build run-server clean help db-up db-down db-reset migrate-up migrate-down migrate-create migrate-status deps install-tools install-lint install-goreleaser lint lint-fix coverage release-snapshot
+
+# Version information
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Linker flags for version injection
+LDFLAGS := -s -w
+LDFLAGS += -X main.version=$(VERSION)
+LDFLAGS += -X main.commit=$(COMMIT)
+LDFLAGS += -X main.buildDate=$(BUILD_DATE)
 
 # Directories
 PROTO_DIR := pkg/api/proto
@@ -78,13 +89,17 @@ test-coverage: ## Run tests with coverage
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
+coverage: test-coverage ## Alias for test-coverage
+
 build-server: ## Build the gRPC server binary
-	@echo "Building server..."
-	@go build -o bin/keyper-server ./cmd/server
+	@echo "Building server ($(VERSION))..."
+	@mkdir -p bin
+	@go build -ldflags "$(LDFLAGS)" -o bin/keyper-server ./cmd/server
 
 build-client: ## Build the CLI client binary
-	@echo "Building client..."
-	@go build -o bin/keyper-client ./cmd/client
+	@echo "Building client ($(VERSION))..."
+	@mkdir -p bin
+	@go build -ldflags "$(LDFLAGS)" -o bin/keyper-client ./cmd/client
 
 build: build-server build-client ## Build both server and client
 
@@ -115,6 +130,11 @@ install-lint: ## Install golangci-lint
 	@echo "Installing golangci-lint..."
 	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	@echo "golangci-lint installed successfully!"
+
+install-goreleaser: ## Install GoReleaser
+	@echo "Installing goreleaser..."
+	@go install github.com/goreleaser/goreleaser/v2@latest
+	@echo "goreleaser installed successfully!"
 
 lint: ## Run golangci-lint
 	@echo "Running linters..."
@@ -157,5 +177,10 @@ migrate-create: ## Create a new migration (usage: make migrate-create NAME=migra
 	fi
 	@migrate create -ext sql -dir $(MIGRATIONS_DIR) -seq $(NAME)
 	@echo "Migration files created!"
+
+release-snapshot: ## Build snapshot release with GoReleaser (no publish)
+	@echo "Building snapshot release..."
+	@goreleaser release --snapshot --clean
+	@echo "Snapshot release built in dist/"
 
 .DEFAULT_GOAL := help

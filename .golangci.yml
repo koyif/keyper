@@ -95,7 +95,7 @@ linters-settings:
     extra-rules: true
 
   goimports:
-    local-prefixes: github.com/koy/keyper
+    local-prefixes: github.com/koyif/keyper
 
   revive:
     confidence: 0.8

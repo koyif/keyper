@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	pb "github.com/koy/keyper/pkg/api/proto"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 )
 
 func TestJSONFormatter(t *testing.T) {

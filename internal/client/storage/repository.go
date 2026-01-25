@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/koy/keyper/pkg/api/proto"
+	"github.com/koyif/keyper/pkg/api/proto"
 )
 
 // ErrSecretNotFound is returned when a secret is not found in the repository.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/koy/keyper/pkg/api/proto"
+	"github.com/koyif/keyper/pkg/api/proto"
 )
 
 // setupTestDB creates an in-memory SQLite database for testing.

@@ -673,7 +673,7 @@ const file_auth_proto_rawDesc = "" +
 	"\x05Login\x12\x1b.keyper.api.v1.LoginRequest\x1a\x1c.keyper.api.v1.LoginResponse\"\x19\x82\xd3\xe4\x93\x02\x13:\x01*\"\x0e/v1/auth/login\x12t\n" +
 	"\fRefreshToken\x12\".keyper.api.v1.RefreshTokenRequest\x1a#.keyper.api.v1.RefreshTokenResponse\"\x1b\x82\xd3\xe4\x93\x02\x15:\x01*\"\x10/v1/auth/refresh\x12a\n" +
 	"\x06Logout\x12\x1c.keyper.api.v1.LogoutRequest\x1a\x1d.keyper.api.v1.LogoutResponse\"\x1a\x82\xd3\xe4\x93\x02\x14:\x01*\"\x0f/v1/auth/logout\x12\x82\x01\n" +
-	"\x0eChangePassword\x12$.keyper.api.v1.ChangePasswordRequest\x1a%.keyper.api.v1.ChangePasswordResponse\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/auth/change-passwordB+Z)github.com/koy/keyper/pkg/api/proto;protob\x06proto3"
+	"\x0eChangePassword\x12$.keyper.api.v1.ChangePasswordRequest\x1a%.keyper.api.v1.ChangePasswordResponse\"#\x82\xd3\xe4\x93\x02\x1d:\x01*\"\x18/v1/auth/change-passwordB-Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
 
 var (
 	file_auth_proto_rawDescOnce sync.Once

@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/spf13/viper"
 
-	"github.com/koy/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/config"
 )
 
 // deviceIDMutex protects device ID loading/creation to prevent race conditions.

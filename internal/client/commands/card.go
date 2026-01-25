@@ -11,11 +11,11 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/google/uuid"
-	"github.com/koy/keyper/internal/client/config"
-	"github.com/koy/keyper/internal/client/session"
-	"github.com/koy/keyper/internal/client/storage"
-	"github.com/koy/keyper/internal/crypto"
-	pb "github.com/koy/keyper/pkg/api/proto"
+	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/session"
+	"github.com/koyif/keyper/internal/client/storage"
+	"github.com/koyif/keyper/internal/crypto"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -387,36 +387,16 @@ func newCardGetCmd(_ func() *config.Config, getSess func() *session.Session, get
 
 			ctx := context.Background()
 
-			// Try to get by ID first, then by name
-			var secret *storage.LocalSecret
-			secret, err = repo.Get(ctx, identifier)
+			// Get and validate secret
+			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_BANK_CARD)
 			if err != nil {
-				// Try by name
-				secret, err = repo.GetByName(ctx, identifier)
-				if err != nil {
-					return fmt.Errorf("card not found: %s", identifier)
-				}
-			}
-
-			// Check if deleted
-			if secret.IsDeleted {
-				return fmt.Errorf("card has been deleted")
-			}
-
-			// Check type
-			if secret.Type != pb.SecretType_SECRET_TYPE_BANK_CARD {
-				return fmt.Errorf("secret is not a bank card (type: %s)", secret.Type)
+				return err
 			}
 
 			// Decrypt the data
-			encryptionKey := sess.GetEncryptionKey()
-			if encryptionKey == nil {
-				return fmt.Errorf("encryption key not found in session")
-			}
-
-			decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
+			decryptedData, err := decryptSecret(secret, sess)
 			if err != nil {
-				return fmt.Errorf("failed to decrypt card: %w", err)
+				return err
 			}
 
 			// Unmarshal card data
@@ -573,22 +553,10 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 
 			ctx := context.Background()
 
-			// Get existing secret
-			var secret *storage.LocalSecret
-			secret, err = repo.Get(ctx, identifier)
+			// Get and validate secret
+			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_BANK_CARD)
 			if err != nil {
-				secret, err = repo.GetByName(ctx, identifier)
-				if err != nil {
-					return fmt.Errorf("card not found: %s", identifier)
-				}
-			}
-
-			if secret.IsDeleted {
-				return fmt.Errorf("card has been deleted")
-			}
-
-			if secret.Type != pb.SecretType_SECRET_TYPE_BANK_CARD {
-				return fmt.Errorf("secret is not a bank card")
+				return err
 			}
 
 			// Decrypt existing data
@@ -800,44 +768,21 @@ func newCardDeleteCmd(_ func() *config.Config, getSess func() *session.Session, 
 
 			ctx := context.Background()
 
-			// Get secret to confirm
-			var secret *storage.LocalSecret
-			secret, err = repo.Get(ctx, identifier)
+			// Get and validate secret
+			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_BANK_CARD)
 			if err != nil {
-				secret, err = repo.GetByName(ctx, identifier)
-				if err != nil {
-					return fmt.Errorf("card not found: %s", identifier)
-				}
-			}
-
-			if secret.IsDeleted {
-				return fmt.Errorf("card already deleted")
-			}
-
-			if secret.Type != pb.SecretType_SECRET_TYPE_BANK_CARD {
-				return fmt.Errorf("secret is not a bank card")
+				return err
 			}
 
 			// Confirm deletion
-			if !noConfirm {
-				var confirm bool
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewConfirm().
-							Title(fmt.Sprintf("Delete card '%s'?", secret.Name)).
-							Description("This will mark the card as deleted and sync to the server.").
-							Value(&confirm),
-					),
-				)
+			confirm, err := confirmDeletion(secret.Name, "card", noConfirm)
+			if err != nil {
+				return err
+			}
 
-				if err := form.Run(); err != nil {
-					return fmt.Errorf("operation cancelled: %w", err)
-				}
-
-				if !confirm {
-					fmt.Println("Deletion cancelled")
-					return nil
-				}
+			if !confirm {
+				fmt.Println("Deletion cancelled")
+				return nil
 			}
 
 			// Delete (soft delete)

@@ -15,6 +15,41 @@ type SQLiteRepository struct {
 	db *sql.DB
 }
 
+// scanSecret is a helper method to scan a database row into a LocalSecret.
+// This eliminates duplicate Scan patterns across Get, GetByName, GetInTx, and List methods.
+func scanSecret(scanner interface {
+	Scan(dest ...any) error
+}) (*LocalSecret, error) {
+	secret := &LocalSecret{}
+	err := scanner.Scan(
+		&secret.ID, &secret.Name, &secret.Type, &secret.EncryptedData, &secret.Nonce,
+		&secret.Metadata, &secret.Version, &secret.IsDeleted, &secret.SyncStatus,
+		&secret.ServerVersion, &secret.CreatedAt, &secret.UpdatedAt, &secret.LocalUpdatedAt,
+	)
+	return secret, err
+}
+
+// initializeSecretDefaults sets default values for a secret before insertion.
+// This eliminates duplicate initialization logic in Create and CreateInTx methods.
+func initializeSecretDefaults(secret *LocalSecret) {
+	now := time.Now()
+	if secret.CreatedAt.IsZero() {
+		secret.CreatedAt = now
+	}
+	if secret.UpdatedAt.IsZero() {
+		secret.UpdatedAt = now
+	}
+	if secret.LocalUpdatedAt.IsZero() {
+		secret.LocalUpdatedAt = now
+	}
+	if secret.Version == 0 {
+		secret.Version = 1
+	}
+	if secret.SyncStatus == "" {
+		secret.SyncStatus = SyncStatusPending
+	}
+}
+
 // NewSQLiteRepository creates a new SQLite repository.
 func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 	// Open database with SQLite URI
@@ -150,22 +185,7 @@ func (r *SQLiteRepository) Create(ctx context.Context, secret *LocalSecret) erro
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	now := time.Now()
-	if secret.CreatedAt.IsZero() {
-		secret.CreatedAt = now
-	}
-	if secret.UpdatedAt.IsZero() {
-		secret.UpdatedAt = now
-	}
-	if secret.LocalUpdatedAt.IsZero() {
-		secret.LocalUpdatedAt = now
-	}
-	if secret.Version == 0 {
-		secret.Version = 1
-	}
-	if secret.SyncStatus == "" {
-		secret.SyncStatus = SyncStatusPending
-	}
+	initializeSecretDefaults(secret)
 
 	_, err := r.db.ExecContext(ctx, query,
 		secret.ID, secret.Name, secret.Type, secret.EncryptedData, secret.Nonce,
@@ -189,12 +209,7 @@ func (r *SQLiteRepository) Get(ctx context.Context, id string) (*LocalSecret, er
 		WHERE id = ?
 	`
 
-	secret := &LocalSecret{}
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
-		&secret.ID, &secret.Name, &secret.Type, &secret.EncryptedData, &secret.Nonce,
-		&secret.Metadata, &secret.Version, &secret.IsDeleted, &secret.SyncStatus,
-		&secret.ServerVersion, &secret.CreatedAt, &secret.UpdatedAt, &secret.LocalUpdatedAt,
-	)
+	secret, err := scanSecret(r.db.QueryRowContext(ctx, query, id))
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %s", ErrSecretNotFound, id)
 	}
@@ -217,12 +232,7 @@ func (r *SQLiteRepository) GetByName(ctx context.Context, name string) (*LocalSe
 		LIMIT 1
 	`
 
-	secret := &LocalSecret{}
-	err := r.db.QueryRowContext(ctx, query, name).Scan(
-		&secret.ID, &secret.Name, &secret.Type, &secret.EncryptedData, &secret.Nonce,
-		&secret.Metadata, &secret.Version, &secret.IsDeleted, &secret.SyncStatus,
-		&secret.ServerVersion, &secret.CreatedAt, &secret.UpdatedAt, &secret.LocalUpdatedAt,
-	)
+	secret, err := scanSecret(r.db.QueryRowContext(ctx, query, name))
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %s", ErrSecretNotFound, name)
 	}
@@ -354,12 +364,7 @@ func (r *SQLiteRepository) List(ctx context.Context, filters ListFilters) ([]*Lo
 
 	var secrets []*LocalSecret
 	for rows.Next() {
-		secret := &LocalSecret{}
-		err := rows.Scan(
-			&secret.ID, &secret.Name, &secret.Type, &secret.EncryptedData, &secret.Nonce,
-			&secret.Metadata, &secret.Version, &secret.IsDeleted, &secret.SyncStatus,
-			&secret.ServerVersion, &secret.CreatedAt, &secret.UpdatedAt, &secret.LocalUpdatedAt,
-		)
+		secret, err := scanSecret(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
 		}
@@ -429,22 +434,7 @@ func (r *SQLiteRepository) CreateInTx(ctx context.Context, tx *sql.Tx, secret *L
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
-	now := time.Now()
-	if secret.CreatedAt.IsZero() {
-		secret.CreatedAt = now
-	}
-	if secret.UpdatedAt.IsZero() {
-		secret.UpdatedAt = now
-	}
-	if secret.LocalUpdatedAt.IsZero() {
-		secret.LocalUpdatedAt = now
-	}
-	if secret.Version == 0 {
-		secret.Version = 1
-	}
-	if secret.SyncStatus == "" {
-		secret.SyncStatus = SyncStatusPending
-	}
+	initializeSecretDefaults(secret)
 
 	_, err := tx.ExecContext(ctx, query,
 		secret.ID, secret.Name, secret.Type, secret.EncryptedData, secret.Nonce,
@@ -468,12 +458,7 @@ func (r *SQLiteRepository) GetInTx(ctx context.Context, tx *sql.Tx, id string) (
 		WHERE id = ?
 	`
 
-	secret := &LocalSecret{}
-	err := tx.QueryRowContext(ctx, query, id).Scan(
-		&secret.ID, &secret.Name, &secret.Type, &secret.EncryptedData, &secret.Nonce,
-		&secret.Metadata, &secret.Version, &secret.IsDeleted, &secret.SyncStatus,
-		&secret.ServerVersion, &secret.CreatedAt, &secret.UpdatedAt, &secret.LocalUpdatedAt,
-	)
+	secret, err := scanSecret(tx.QueryRowContext(ctx, query, id))
 	if err == sql.ErrNoRows {
 		return nil, ErrSecretNotFound
 	}

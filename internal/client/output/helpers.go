@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/koy/keyper/internal/client/storage"
-	pb "github.com/koy/keyper/pkg/api/proto"
+	"github.com/koyif/keyper/internal/client/storage"
+	pb "github.com/koyif/keyper/pkg/api/proto"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 

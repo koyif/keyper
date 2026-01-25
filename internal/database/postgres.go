@@ -30,25 +30,21 @@ type DB struct {
 
 // New creates a new database connection and runs migrations
 func New(cfg Config) (*DB, error) {
-	// Build connection string
 	connStr := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode,
 	)
 
-	// Open database connection
 	sqlDB, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Configure connection pool
 	sqlDB.SetMaxOpenConns(25)
 	sqlDB.SetMaxIdleConns(5)
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	sqlDB.SetConnMaxIdleTime(1 * time.Minute)
 
-	// Test connection
 	if err := sqlDB.Ping(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
@@ -59,7 +55,6 @@ func New(cfg Config) (*DB, error) {
 		config: cfg,
 	}
 
-	// Run migrations
 	if err := db.runMigrations(); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
@@ -70,13 +65,11 @@ func New(cfg Config) (*DB, error) {
 
 // runMigrations executes database migrations
 func (db *DB) runMigrations() error {
-	// Create migration driver
 	driver, err := postgres.WithInstance(db.DB, &postgres.Config{})
 	if err != nil {
 		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
-	// Create migrate instance with file-based migrations
 	// Migrations are expected to be in the migrations/ directory
 	m, err := migrate.NewWithDatabaseInstance(
 		"file://migrations",
@@ -88,12 +81,10 @@ func (db *DB) runMigrations() error {
 	}
 	defer m.Close()
 
-	// Run migrations
 	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
-	// Get current migration version
 	version, dirty, err := m.Version()
 	if err != nil && err != migrate.ErrNilVersion {
 		return fmt.Errorf("failed to get migration version: %w", err)

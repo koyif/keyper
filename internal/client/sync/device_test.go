@@ -10,7 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/koy/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/config"
 )
 
 func TestLoadOrCreateDeviceID_GeneratesValidUUID(t *testing.T) {

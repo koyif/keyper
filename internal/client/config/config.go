@@ -63,18 +63,14 @@ func DefaultConfig() *Config {
 func Load(configPath string) (*Config, error) {
 	cfg := DefaultConfig()
 
-	// Set up Viper
 	v := viper.New()
 
-	// Set config file path if provided
 	if configPath != "" {
-		// Check if the file exists first
 		if _, err := os.Stat(configPath); err == nil {
 			v.SetConfigFile(configPath)
 		}
 		cfg.ConfigPath = configPath
 	} else {
-		// Try default config locations
 		homeDir, err := os.UserHomeDir()
 		if err == nil {
 			keyperDir := filepath.Join(homeDir, ".keyper")
@@ -85,29 +81,24 @@ func Load(configPath string) (*Config, error) {
 		}
 	}
 
-	// Set environment variable prefix and bind specific keys
 	v.SetEnvPrefix("KEYPER")
 	v.AutomaticEnv()
 
-	// Explicitly bind environment variables to config keys
 	v.BindEnv("server")
 	v.BindEnv("verbose")
 	v.BindEnv("format")
 	v.BindEnv("session_path")
 	v.BindEnv("db_path")
 
-	// Try to read config file (it's okay if it doesn't exist)
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
-		// Config file not found; using defaults
 		logrus.Debug("No config file found, using defaults")
 	} else {
 		logrus.Debugf("Using config file: %s", v.ConfigFileUsed())
 	}
 
-	// Unmarshal config into struct
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}

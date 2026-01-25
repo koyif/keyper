@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/koy/keyper/internal/client/config"
-	"github.com/koy/keyper/internal/client/session"
-	"github.com/koy/keyper/internal/client/storage"
-	"github.com/koy/keyper/internal/client/sync"
+	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/session"
+	"github.com/koyif/keyper/internal/client/storage"
+	"github.com/koyif/keyper/internal/client/sync"
 	"github.com/spf13/cobra"
 )
 
@@ -146,9 +146,11 @@ func printSyncStatus(ctx context.Context, cfg *config.Config, repo storage.Repos
 func formatDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%.0f seconds", d.Seconds())
-	} else if d < time.Hour {
+	}
+	if d < time.Hour {
 		return fmt.Sprintf("%.0f minutes", d.Minutes())
-	} else if d < 24*time.Hour {
+	}
+	if d < 24*time.Hour {
 		return fmt.Sprintf("%.1f hours", d.Hours())
 	}
 	return fmt.Sprintf("%.1f days", d.Hours()/24)

@@ -936,7 +936,7 @@ const file_models_proto_rawDesc = "" +
 	"\x16SECRET_TYPE_CREDENTIAL\x10\x01\x12\x14\n" +
 	"\x10SECRET_TYPE_TEXT\x10\x02\x12\x16\n" +
 	"\x12SECRET_TYPE_BINARY\x10\x03\x12\x19\n" +
-	"\x15SECRET_TYPE_BANK_CARD\x10\x04B+Z)github.com/koy/keyper/pkg/api/proto;protob\x06proto3"
+	"\x15SECRET_TYPE_BANK_CARD\x10\x04B-Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
 
 var (
 	file_models_proto_rawDescOnce sync.Once

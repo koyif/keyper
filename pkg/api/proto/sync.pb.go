@@ -586,7 +586,7 @@ const file_sync_proto_rawDesc = "" +
 	"\vSyncService\x12Y\n" +
 	"\x04Pull\x12\x1a.keyper.api.v1.PullRequest\x1a\x1b.keyper.api.v1.PullResponse\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/v1/sync/pull\x12Y\n" +
 	"\x04Push\x12\x1a.keyper.api.v1.PushRequest\x1a\x1b.keyper.api.v1.PushResponse\"\x18\x82\xd3\xe4\x93\x02\x12:\x01*\"\r/v1/sync/push\x12s\n" +
-	"\rGetSyncStatus\x12#.keyper.api.v1.GetSyncStatusRequest\x1a$.keyper.api.v1.GetSyncStatusResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/sync/statusB+Z)github.com/koy/keyper/pkg/api/proto;protob\x06proto3"
+	"\rGetSyncStatus\x12#.keyper.api.v1.GetSyncStatusRequest\x1a$.keyper.api.v1.GetSyncStatusResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/sync/statusB-Z+github.com/koyif/keyper/pkg/api/proto;protob\x06proto3"
 
 var (
 	file_sync_proto_rawDescOnce sync.Once
