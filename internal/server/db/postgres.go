@@ -7,6 +7,7 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
+	// Import file driver for migration source
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,6 +29,10 @@ type Config struct {
 	MaxConnLifetime   time.Duration
 	MaxConnIdleTime   time.Duration
 	HealthCheckPeriod time.Duration
+
+	// Migration settings
+	SkipMigrations bool   // Skip running migrations (useful for tests)
+	MigrationsPath string // Path to migrations directory (defaults to "migrations" if empty)
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -52,6 +57,7 @@ type Pool struct {
 
 // NewPool creates a new database connection pool with the given configuration.
 // It implements connection retry with exponential backoff and runs health checks.
+// If cfg is nil, DefaultConfig() is used (note: default config lacks credentials and will fail to connect).
 func NewPool(ctx context.Context, cfg *Config) (*Pool, error) {
 	if cfg == nil {
 		cfg = DefaultConfig()
@@ -82,15 +88,15 @@ func NewPool(ctx context.Context, cfg *Config) (*Pool, error) {
 	}
 
 	// Attempt to create pool with retry logic
+	const maxRetries = 5
 	var pool *pgxpool.Pool
-	maxRetries := 5
 	backoff := time.Second
 
 	for i := range maxRetries {
 		pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
 		if err == nil {
 			// Test the connection
-			if err := pool.Ping(ctx); err == nil {
+			if err = pool.Ping(ctx); err == nil {
 				break
 			}
 			pool.Close()
@@ -112,10 +118,12 @@ func NewPool(ctx context.Context, cfg *Config) (*Pool, error) {
 		config: cfg,
 	}
 
-	// Run migrations.
-	if err := p.runMigrations(ctx); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	// Run migrations unless skipped.
+	if !cfg.SkipMigrations {
+		if err := p.runMigrations(ctx); err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("failed to run migrations: %w", err)
+		}
 	}
 
 	return p, nil
@@ -144,7 +152,8 @@ func (p *Pool) Close() {
 }
 
 // runMigrations executes database migrations.
-func (p *Pool) runMigrations(ctx context.Context) error {
+// Note: ctx parameter is reserved for future use (e.g., cancellation support).
+func (p *Pool) runMigrations(_ context.Context) error {
 	// Register pgx driver with database/sql.
 	db := stdlib.OpenDB(*p.Pool.Config().ConnConfig)
 	defer db.Close()
@@ -154,9 +163,15 @@ func (p *Pool) runMigrations(ctx context.Context) error {
 		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
+	// Use configured migrations path or default to "migrations".
+	migrationsPath := "migrations"
+	if p.config.MigrationsPath != "" {
+		migrationsPath = p.config.MigrationsPath
+	}
+
 	// Migrations are expected to be in the migrations/ directory.
 	m, err := migrate.NewWithDatabaseInstance(
-		"file://migrations",
+		"file://"+migrationsPath,
 		"postgres",
 		driver,
 	)

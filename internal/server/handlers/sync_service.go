@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/google/uuid"
 	"github.com/koyif/keyper/internal/server/auth"
 	"github.com/koyif/keyper/internal/server/repository"
 	"github.com/koyif/keyper/internal/server/repository/postgres"
@@ -35,17 +35,56 @@ func NewSyncService(secretRepo *postgres.SecretRepository, transactor *postgres.
 	}
 }
 
-// Pull retrieves changes from the server since last sync.
-func (s *SyncService) Pull(ctx context.Context, req *pb.PullRequest) (*pb.PullResponse, error) {
-	// Extract user ID from context (set by auth interceptor).
+// getUserID extracts and validates user ID from context.
+func (s *SyncService) getUserID(ctx context.Context) (uuid.UUID, error) {
 	userIDStr, err := auth.GetUserIDFromContext(ctx)
 	if err != nil {
-		return nil, err
+		return uuid.Nil, err
 	}
 
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "invalid user_id in context: %v", err)
+		return uuid.Nil, status.Errorf(codes.Internal, "invalid user_id in context: %v", err)
+	}
+
+	return userID, nil
+}
+
+// decodeEncryptedData decodes base64 encrypted data and extracts nonce and ciphertext.
+// The encrypted data format is: nonce (12 bytes) + ciphertext.
+func decodeEncryptedData(encryptedDataB64 string) (nonce, ciphertext []byte, err error) {
+	encryptedBytes, err := base64.StdEncoding.DecodeString(encryptedDataB64)
+	if err != nil {
+		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid base64 encrypted_data: %v", err)
+	}
+
+	if len(encryptedBytes) < 12 {
+		return nil, nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)")
+	}
+
+	return encryptedBytes[:12], encryptedBytes[12:], nil
+}
+
+// serializeMetadata serializes metadata to JSON bytes.
+func serializeMetadata(metadata *pb.Metadata) ([]byte, error) {
+	if metadata == nil {
+		return nil, nil
+	}
+
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to serialize metadata: %v", err)
+	}
+
+	return metadataJSON, nil
+}
+
+// Pull retrieves changes from the server since last sync.
+func (s *SyncService) Pull(ctx context.Context, req *pb.PullRequest) (*pb.PullResponse, error) {
+	// Extract user ID from context (set by auth interceptor).
+	userID, err := s.getUserID(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// Extract device ID for logging.
@@ -88,22 +127,15 @@ func (s *SyncService) Pull(ctx context.Context, req *pb.PullRequest) (*pb.PullRe
 		Secrets:          secrets,
 		DeletedSecretIds: deletedSecretIDs,
 		SyncTime:         timestamppb.Now(),
-		HasConflicts:     false,
-		Conflicts:        nil,
 	}, nil
 }
 
 // Push sends local changes to the server.
 func (s *SyncService) Push(ctx context.Context, req *pb.PushRequest) (*pb.PushResponse, error) {
 	// Extract user ID from context.
-	userIDStr, err := auth.GetUserIDFromContext(ctx)
+	userID, err := s.getUserID(ctx)
 	if err != nil {
 		return nil, err
-	}
-
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "invalid user_id in context: %v", err)
 	}
 
 	// Extract device ID for logging.
@@ -128,19 +160,19 @@ func (s *SyncService) Push(ctx context.Context, req *pb.PushRequest) (*pb.PushRe
 
 			// Check if secret exists on server.
 			existingSecret, err := s.secretRepo.Get(txCtx, secretID)
-
-			if err != nil {
-				if errors.Is(err, repository.ErrNotFound) {
-					// Secret doesn't exist - this is a create operation.
-					created, createErr := s.createSecret(txCtx, userID, pbSecret)
-					if createErr != nil {
-						return createErr
-					}
-					acceptedIDs = append(acceptedIDs, created.ID.String())
-					log.Printf("[SyncService.Push] created secret %s version %d", created.ID, created.Version)
-					continue
-				}
+			if err != nil && !errors.Is(err, repository.ErrNotFound) {
 				return fmt.Errorf("failed to check existing secret: %w", err)
+			}
+
+			// Secret doesn't exist - this is a create operation.
+			if errors.Is(err, repository.ErrNotFound) {
+				created, createErr := s.createSecret(txCtx, userID, pbSecret)
+				if createErr != nil {
+					return createErr
+				}
+				acceptedIDs = append(acceptedIDs, created.ID.String())
+				log.Printf("[SyncService.Push] created secret %s version %d", created.ID, created.Version)
+				continue
 			}
 
 			// Secret exists - check for version conflict (last-write-wins).
@@ -243,7 +275,6 @@ func (s *SyncService) Push(ctx context.Context, req *pb.PushRequest) (*pb.PushRe
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to push changes: %v", err)
 	}
@@ -264,16 +295,11 @@ func (s *SyncService) Push(ctx context.Context, req *pb.PushRequest) (*pb.PushRe
 }
 
 // GetSyncStatus retrieves current sync status.
-func (s *SyncService) GetSyncStatus(ctx context.Context, req *pb.GetSyncStatusRequest) (*pb.GetSyncStatusResponse, error) {
+func (s *SyncService) GetSyncStatus(ctx context.Context, _ *pb.GetSyncStatusRequest) (*pb.GetSyncStatusResponse, error) {
 	// Extract user ID from context.
-	userIDStr, err := auth.GetUserIDFromContext(ctx)
+	userID, err := s.getUserID(ctx)
 	if err != nil {
 		return nil, err
-	}
-
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "invalid user_id in context: %v", err)
 	}
 
 	// Extract device ID for logging.
@@ -281,12 +307,10 @@ func (s *SyncService) GetSyncStatus(ctx context.Context, req *pb.GetSyncStatusRe
 	log.Printf("[SyncService.GetSyncStatus] user_id=%s device_id=%s", userID, deviceID)
 
 	// Get count of user's secrets (non-deleted only).
-	secrets, err := s.secretRepo.ListByUser(ctx, userID, 10000, 0)
+	totalCount, err := s.secretRepo.CountByUser(ctx, userID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to count secrets: %v", err)
 	}
-
-	totalCount := int32(len(secrets))
 
 	log.Printf("[SyncService.GetSyncStatus] user %s has %d secrets", userID, totalCount)
 
@@ -299,30 +323,27 @@ func (s *SyncService) GetSyncStatus(ctx context.Context, req *pb.GetSyncStatusRe
 
 // createSecret creates a new secret from proto message.
 func (s *SyncService) createSecret(ctx context.Context, userID uuid.UUID, pbSecret *pb.Secret) (*repository.Secret, error) {
-	// Decode base64 encrypted data.
-	encryptedBytes, err := base64.StdEncoding.DecodeString(pbSecret.EncryptedData)
+	// Parse the secret ID from the client.
+	secretID, err := uuid.Parse(pbSecret.Id)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid base64 encrypted_data: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid secret id: %v", err)
 	}
 
-	// Extract nonce (first 12 bytes) and ciphertext.
-	if len(encryptedBytes) < 12 {
-		return nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)")
+	// Decode base64 encrypted data and extract nonce and ciphertext.
+	nonce, ciphertext, err := decodeEncryptedData(pbSecret.EncryptedData)
+	if err != nil {
+		return nil, err
 	}
-	nonce := encryptedBytes[:12]
-	ciphertext := encryptedBytes[12:]
 
 	// Serialize metadata to JSON.
-	var metadataJSON []byte
-	if pbSecret.Metadata != nil {
-		metadataJSON, err = json.Marshal(pbSecret.Metadata)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to serialize metadata: %v", err)
-		}
+	metadataJSON, err := serializeMetadata(pbSecret.Metadata)
+	if err != nil {
+		return nil, err
 	}
 
-	// Create secret entity.
+	// Create secret entity with client-provided ID.
 	secret := &repository.Secret{
+		ID:            secretID,
 		UserID:        userID,
 		Name:          pbSecret.Title,
 		Type:          int32(pbSecret.Type),
@@ -342,26 +363,16 @@ func (s *SyncService) createSecret(ctx context.Context, userID uuid.UUID, pbSecr
 
 // updateSecret updates an existing secret from proto message.
 func (s *SyncService) updateSecret(ctx context.Context, existing *repository.Secret, pbSecret *pb.Secret) (*repository.Secret, error) {
-	// Decode base64 encrypted data.
-	encryptedBytes, err := base64.StdEncoding.DecodeString(pbSecret.EncryptedData)
+	// Decode base64 encrypted data and extract nonce and ciphertext.
+	nonce, ciphertext, err := decodeEncryptedData(pbSecret.EncryptedData)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid base64 encrypted_data: %v", err)
+		return nil, err
 	}
-
-	// Extract nonce and ciphertext.
-	if len(encryptedBytes) < 12 {
-		return nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)")
-	}
-	nonce := encryptedBytes[:12]
-	ciphertext := encryptedBytes[12:]
 
 	// Serialize metadata to JSON.
-	var metadataJSON []byte
-	if pbSecret.Metadata != nil {
-		metadataJSON, err = json.Marshal(pbSecret.Metadata)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to serialize metadata: %v", err)
-		}
+	metadataJSON, err := serializeMetadata(pbSecret.Metadata)
+	if err != nil {
+		return nil, err
 	}
 
 	// Update fields.

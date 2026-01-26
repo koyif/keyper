@@ -6,16 +6,30 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/koyif/keyper/internal/server/repository"
 )
+
+// setSecretTimestamp updates the updated_at timestamp for a secret.
+func setSecretTimestamp(t *testing.T, pool *pgxpool.Pool, secretID uuid.UUID, timestamp time.Time) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(), "UPDATE secrets SET updated_at = $1 WHERE id = $2", timestamp, secretID)
+	if err != nil {
+		t.Fatalf("Failed to update timestamp: %v", err)
+	}
+}
 
 func TestHardDeleteTombstones(t *testing.T) {
 	pool := setupTestDB(t)
 	defer pool.Close()
 
 	repo := NewSecretRepository(pool)
+	userRepo := NewUserRepository(pool)
 	ctx := context.Background()
-	userID := uuid.New()
+
+	// Create a test user first
+	user := createTestUser(t, ctx, userRepo)
+	userID := user.ID
 
 	// Create test secrets
 	now := time.Now()
@@ -43,10 +57,7 @@ func TestHardDeleteTombstones(t *testing.T) {
 
 	// Manually update the updated_at to be 40 days ago
 	oldDate := now.Add(-40 * 24 * time.Hour)
-	_, err = pool.Exec(ctx, "UPDATE secrets SET updated_at = $1 WHERE id = $2", oldDate, oldTombstone.ID)
-	if err != nil {
-		t.Fatalf("Failed to update timestamp: %v", err)
-	}
+	setSecretTimestamp(t, pool, oldTombstone.ID, oldDate)
 
 	// Create a recent tombstone (should NOT be deleted)
 	recentTombstone := &repository.Secret{
@@ -130,14 +141,18 @@ func TestHardDeleteTombstones_BatchSize(t *testing.T) {
 	defer pool.Close()
 
 	repo := NewSecretRepository(pool)
+	userRepo := NewUserRepository(pool)
 	ctx := context.Background()
-	userID := uuid.New()
+
+	// Create a test user first
+	user := createTestUser(t, ctx, userRepo)
+	userID := user.ID
 
 	// Create 5 old tombstones
 	now := time.Now()
 	oldDate := now.Add(-40 * 24 * time.Hour)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		secret := &repository.Secret{
 			UserID:        userID,
 			Name:          "tombstone",
@@ -159,10 +174,7 @@ func TestHardDeleteTombstones_BatchSize(t *testing.T) {
 		}
 
 		// Update timestamp
-		_, err = pool.Exec(ctx, "UPDATE secrets SET updated_at = $1 WHERE id = $2", oldDate, secret.ID)
-		if err != nil {
-			t.Fatalf("Failed to update timestamp %d: %v", i, err)
-		}
+		setSecretTimestamp(t, pool, secret.ID, oldDate)
 	}
 
 	cutoffTime := now.Add(-30 * 24 * time.Hour)

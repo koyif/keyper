@@ -22,47 +22,78 @@ import (
 	pb "github.com/koyif/keyper/pkg/api/proto"
 )
 
-// TestSyncService_Pull tests the Pull operation.
-func TestSyncService_Pull(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+// testServices holds common test dependencies.
+type testServices struct {
+	pool        *pgxpool.Pool
+	secretRepo  *postgres.SecretRepository
+	userRepo    *postgres.UserRepository
+	transactor  *postgres.Transactor
+	syncService *SyncService
+}
 
+// setupSyncServiceTest initializes test services and database.
+func setupSyncServiceTest(t *testing.T) *testServices {
+	t.Helper()
+
+	pool := setupTestDB(t)
 	secretRepo := postgres.NewSecretRepository(pool)
+	userRepo := postgres.NewUserRepository(pool)
 	transactor := postgres.NewTransactor(pool)
 	syncService := NewSyncService(secretRepo, transactor)
 
-	ctx := context.Background()
-	userID := uuid.New()
+	return &testServices{
+		pool:        pool,
+		secretRepo:  secretRepo,
+		userRepo:    userRepo,
+		transactor:  transactor,
+		syncService: syncService,
+	}
+}
 
-	// Add user ID to context.
+// setupTestContext creates a context with user ID and device ID.
+func setupTestContext(userID uuid.UUID, deviceID string) context.Context {
+	ctx := context.Background()
 	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
-	ctx = context.WithValue(ctx, auth.DeviceIDContextKey, "test-device")
+	if deviceID != "" {
+		ctx = context.WithValue(ctx, auth.DeviceIDContextKey, deviceID)
+	}
+	return ctx
+}
+
+// TestSyncService_Pull tests the Pull operation.
+func TestSyncService_Pull(t *testing.T) {
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
+
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "test-device")
 
 	// Create some test secrets.
 	secret1 := &repository.Secret{
-		UserID:        userID,
+		UserID:        user.ID,
 		Name:          "Secret 1",
 		Type:          int32(pb.SecretType_SECRET_TYPE_CREDENTIAL),
 		EncryptedData: []byte("encrypted1"),
 		Nonce:         []byte("nonce1234567"),
 		Metadata:      []byte(`{"category":"work"}`),
 	}
-	created1, err := secretRepo.Create(ctx, secret1)
+	created1, err := ts.secretRepo.Create(ctx, secret1)
 	require.NoError(t, err)
 
 	secret2 := &repository.Secret{
-		UserID:        userID,
+		UserID:        user.ID,
 		Name:          "Secret 2",
 		Type:          int32(pb.SecretType_SECRET_TYPE_TEXT),
 		EncryptedData: []byte("encrypted2"),
 		Nonce:         []byte("nonce2345678"),
 		Metadata:      []byte(`{"category":"personal"}`),
 	}
-	created2, err := secretRepo.Create(ctx, secret2)
+	created2, err := ts.secretRepo.Create(ctx, secret2)
 	require.NoError(t, err)
 
 	// Delete one secret.
-	err = secretRepo.Delete(ctx, created2.ID, created2.Version)
+	err = ts.secretRepo.Delete(ctx, created2.ID, created2.Version)
 	require.NoError(t, err)
 
 	// Pull changes since epoch.
@@ -70,7 +101,7 @@ func TestSyncService_Pull(t *testing.T) {
 		LastSyncTime: timestamppb.New(time.Unix(0, 0)),
 	}
 
-	resp, err := syncService.Pull(ctx, req)
+	resp, err := ts.syncService.Pull(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -91,27 +122,23 @@ func TestSyncService_Pull(t *testing.T) {
 
 // TestSyncService_Pull_NoChanges tests Pull with no changes since last sync.
 func TestSyncService_Pull_NoChanges(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
-
-	ctx := context.Background()
-	userID := uuid.New()
-	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "")
 
 	// Create a secret.
 	secret := &repository.Secret{
-		UserID:        userID,
+		UserID:        user.ID,
 		Name:          "Secret",
 		Type:          int32(pb.SecretType_SECRET_TYPE_CREDENTIAL),
 		EncryptedData: []byte("encrypted"),
 		Nonce:         []byte("nonce1234567"),
 		Metadata:      []byte(`{}`),
 	}
-	created, err := secretRepo.Create(ctx, secret)
+	created, err := ts.secretRepo.Create(ctx, secret)
 	require.NoError(t, err)
 
 	// Pull changes after the secret was created.
@@ -119,7 +146,7 @@ func TestSyncService_Pull_NoChanges(t *testing.T) {
 		LastSyncTime: timestamppb.New(created.UpdatedAt.Add(1 * time.Second)),
 	}
 
-	resp, err := syncService.Pull(ctx, req)
+	resp, err := ts.syncService.Pull(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -130,16 +157,12 @@ func TestSyncService_Pull_NoChanges(t *testing.T) {
 
 // TestSyncService_Push_Create tests Push operation for creating new secrets.
 func TestSyncService_Push_Create(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
-
-	ctx := context.Background()
-	userID := uuid.New()
-	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "")
 
 	// Prepare encrypted data with nonce.
 	nonce := []byte("nonce1234567")
@@ -169,7 +192,7 @@ func TestSyncService_Push_Create(t *testing.T) {
 		},
 	}
 
-	resp, err := syncService.Push(ctx, req)
+	resp, err := ts.syncService.Push(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -179,7 +202,7 @@ func TestSyncService_Push_Create(t *testing.T) {
 	assert.Contains(t, resp.AcceptedSecretIds, newSecretID.String())
 
 	// Verify secret was created in database.
-	created, err := secretRepo.Get(ctx, newSecretID)
+	created, err := ts.secretRepo.Get(ctx, newSecretID)
 	require.NoError(t, err)
 	assert.Equal(t, "New Secret", created.Name)
 	assert.Equal(t, int64(1), created.Version)
@@ -187,27 +210,23 @@ func TestSyncService_Push_Create(t *testing.T) {
 
 // TestSyncService_Push_Update tests Push operation for updating existing secrets.
 func TestSyncService_Push_Update(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
-
-	ctx := context.Background()
-	userID := uuid.New()
-	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "")
 
 	// Create initial secret.
 	secret := &repository.Secret{
-		UserID:        userID,
+		UserID:        user.ID,
 		Name:          "Original Name",
 		Type:          int32(pb.SecretType_SECRET_TYPE_CREDENTIAL),
 		EncryptedData: []byte("original_data"),
 		Nonce:         []byte("nonce1234567"),
 		Metadata:      []byte(`{}`),
 	}
-	created, err := secretRepo.Create(ctx, secret)
+	created, err := ts.secretRepo.Create(ctx, secret)
 	require.NoError(t, err)
 
 	// Prepare updated encrypted data.
@@ -229,7 +248,7 @@ func TestSyncService_Push_Update(t *testing.T) {
 		},
 	}
 
-	resp, err := syncService.Push(ctx, req)
+	resp, err := ts.syncService.Push(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -238,7 +257,7 @@ func TestSyncService_Push_Update(t *testing.T) {
 	assert.Empty(t, resp.Conflicts)
 
 	// Verify secret was updated.
-	updated, err := secretRepo.Get(ctx, created.ID)
+	updated, err := ts.secretRepo.Get(ctx, created.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated Name", updated.Name)
 	assert.Equal(t, int64(2), updated.Version) // Version incremented.
@@ -246,32 +265,28 @@ func TestSyncService_Push_Update(t *testing.T) {
 
 // TestSyncService_Push_VersionConflict tests Push operation with version conflict.
 func TestSyncService_Push_VersionConflict(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
-
-	ctx := context.Background()
-	userID := uuid.New()
-	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "")
 
 	// Create initial secret.
 	secret := &repository.Secret{
-		UserID:        userID,
+		UserID:        user.ID,
 		Name:          "Original",
 		Type:          int32(pb.SecretType_SECRET_TYPE_CREDENTIAL),
 		EncryptedData: []byte("data"),
 		Nonce:         []byte("nonce1234567"),
 		Metadata:      []byte(`{}`),
 	}
-	created, err := secretRepo.Create(ctx, secret)
+	created, err := ts.secretRepo.Create(ctx, secret)
 	require.NoError(t, err)
 
 	// Update the secret on server side.
 	created.Name = "Server Updated"
-	updated, err := secretRepo.Update(ctx, created)
+	updated, err := ts.secretRepo.Update(ctx, created)
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), updated.Version)
 
@@ -293,7 +308,7 @@ func TestSyncService_Push_VersionConflict(t *testing.T) {
 		},
 	}
 
-	resp, err := syncService.Push(ctx, req)
+	resp, err := ts.syncService.Push(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -311,27 +326,23 @@ func TestSyncService_Push_VersionConflict(t *testing.T) {
 
 // TestSyncService_Push_Delete tests Push operation for deleting secrets.
 func TestSyncService_Push_Delete(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
-
-	ctx := context.Background()
-	userID := uuid.New()
-	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "")
 
 	// Create secret.
 	secret := &repository.Secret{
-		UserID:        userID,
+		UserID:        user.ID,
 		Name:          "To Delete",
 		Type:          int32(pb.SecretType_SECRET_TYPE_CREDENTIAL),
 		EncryptedData: []byte("data"),
 		Nonce:         []byte("nonce1234567"),
 		Metadata:      []byte(`{}`),
 	}
-	created, err := secretRepo.Create(ctx, secret)
+	created, err := ts.secretRepo.Create(ctx, secret)
 	require.NoError(t, err)
 
 	// Push delete.
@@ -339,7 +350,7 @@ func TestSyncService_Push_Delete(t *testing.T) {
 		DeletedSecretIds: []string{created.ID.String()},
 	}
 
-	resp, err := syncService.Push(ctx, req)
+	resp, err := ts.syncService.Push(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -348,36 +359,32 @@ func TestSyncService_Push_Delete(t *testing.T) {
 	assert.Empty(t, resp.Conflicts)
 
 	// Verify secret was soft-deleted.
-	_, err = secretRepo.Get(ctx, created.ID)
+	_, err = ts.secretRepo.Get(ctx, created.ID)
 	assert.ErrorIs(t, err, repository.ErrNotFound)
 }
 
 // TestSyncService_Push_DeleteAlreadyDeleted tests Push operation deleting already deleted secret.
 func TestSyncService_Push_DeleteAlreadyDeleted(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
-
-	ctx := context.Background()
-	userID := uuid.New()
-	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "")
 
 	// Create and delete secret.
 	secret := &repository.Secret{
-		UserID:        userID,
+		UserID:        user.ID,
 		Name:          "Deleted",
 		Type:          int32(pb.SecretType_SECRET_TYPE_CREDENTIAL),
 		EncryptedData: []byte("data"),
 		Nonce:         []byte("nonce1234567"),
 		Metadata:      []byte(`{}`),
 	}
-	created, err := secretRepo.Create(ctx, secret)
+	created, err := ts.secretRepo.Create(ctx, secret)
 	require.NoError(t, err)
 
-	err = secretRepo.Delete(ctx, created.ID, created.Version)
+	err = ts.secretRepo.Delete(ctx, created.ID, created.Version)
 	require.NoError(t, err)
 
 	// Try to delete again.
@@ -385,7 +392,7 @@ func TestSyncService_Push_DeleteAlreadyDeleted(t *testing.T) {
 		DeletedSecretIds: []string{created.ID.String()},
 	}
 
-	resp, err := syncService.Push(ctx, req)
+	resp, err := ts.syncService.Push(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -396,27 +403,23 @@ func TestSyncService_Push_DeleteAlreadyDeleted(t *testing.T) {
 
 // TestSyncService_Push_MultipleOperations tests Push with multiple operations in one request.
 func TestSyncService_Push_MultipleOperations(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
-
-	ctx := context.Background()
-	userID := uuid.New()
-	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "")
 
 	// Create existing secret.
 	existing := &repository.Secret{
-		UserID:        userID,
+		UserID:        user.ID,
 		Name:          "Existing",
 		Type:          int32(pb.SecretType_SECRET_TYPE_CREDENTIAL),
 		EncryptedData: []byte("data"),
 		Nonce:         []byte("nonce1234567"),
 		Metadata:      []byte(`{}`),
 	}
-	created, err := secretRepo.Create(ctx, existing)
+	created, err := ts.secretRepo.Create(ctx, existing)
 	require.NoError(t, err)
 
 	// Prepare new secret.
@@ -430,14 +433,14 @@ func TestSyncService_Push_MultipleOperations(t *testing.T) {
 
 	// Push: create new, update existing, delete another.
 	toDelete := &repository.Secret{
-		UserID:        userID,
+		UserID:        user.ID,
 		Name:          "To Delete",
 		Type:          int32(pb.SecretType_SECRET_TYPE_TEXT),
 		EncryptedData: []byte("delete_data"),
 		Nonce:         []byte("nonce3333333"),
 		Metadata:      []byte(`{}`),
 	}
-	createdToDelete, err := secretRepo.Create(ctx, toDelete)
+	createdToDelete, err := ts.secretRepo.Create(ctx, toDelete)
 	require.NoError(t, err)
 
 	req := &pb.PushRequest{
@@ -460,7 +463,7 @@ func TestSyncService_Push_MultipleOperations(t *testing.T) {
 		DeletedSecretIds: []string{createdToDelete.ID.String()},
 	}
 
-	resp, err := syncService.Push(ctx, req)
+	resp, err := ts.syncService.Push(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -469,51 +472,47 @@ func TestSyncService_Push_MultipleOperations(t *testing.T) {
 	assert.Empty(t, resp.Conflicts)
 
 	// Verify new secret created.
-	newSecret, err := secretRepo.Get(ctx, newID)
+	newSecret, err := ts.secretRepo.Get(ctx, newID)
 	require.NoError(t, err)
 	assert.Equal(t, "New Secret", newSecret.Name)
 
 	// Verify existing secret updated.
-	updatedSecret, err := secretRepo.Get(ctx, created.ID)
+	updatedSecret, err := ts.secretRepo.Get(ctx, created.ID)
 	require.NoError(t, err)
 	assert.Equal(t, "Updated Existing", updatedSecret.Name)
 
 	// Verify secret deleted.
-	_, err = secretRepo.Get(ctx, createdToDelete.ID)
+	_, err = ts.secretRepo.Get(ctx, createdToDelete.ID)
 	assert.ErrorIs(t, err, repository.ErrNotFound)
 }
 
 // TestSyncService_GetSyncStatus tests the GetSyncStatus operation.
 func TestSyncService_GetSyncStatus(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
-
-	ctx := context.Background()
-	userID := uuid.New()
-	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "")
 	ctx = context.WithValue(ctx, auth.DeviceIDContextKey, "test-device")
 
 	// Create some secrets.
 	for i := 0; i < 3; i++ {
 		secret := &repository.Secret{
-			UserID:        userID,
+			UserID:        user.ID,
 			Name:          "Secret",
 			Type:          int32(pb.SecretType_SECRET_TYPE_CREDENTIAL),
 			EncryptedData: []byte("data"),
 			Nonce:         []byte("nonce1234567"),
 			Metadata:      []byte(`{}`),
 		}
-		_, err := secretRepo.Create(ctx, secret)
+		_, err := ts.secretRepo.Create(ctx, secret)
 		require.NoError(t, err)
 	}
 
 	req := &pb.GetSyncStatusRequest{}
 
-	resp, err := syncService.GetSyncStatus(ctx, req)
+	resp, err := ts.syncService.GetSyncStatus(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -524,12 +523,8 @@ func TestSyncService_GetSyncStatus(t *testing.T) {
 
 // TestSyncService_Pull_Unauthenticated tests Pull without authentication.
 func TestSyncService_Pull_Unauthenticated(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
-
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
 	ctx := context.Background()
 	// No user ID in context.
@@ -538,7 +533,7 @@ func TestSyncService_Pull_Unauthenticated(t *testing.T) {
 		LastSyncTime: timestamppb.Now(),
 	}
 
-	_, err := syncService.Pull(ctx, req)
+	_, err := ts.syncService.Pull(ctx, req)
 	require.Error(t, err)
 
 	st, ok := status.FromError(err)
@@ -548,16 +543,12 @@ func TestSyncService_Pull_Unauthenticated(t *testing.T) {
 
 // TestSyncService_Push_InvalidSecretID tests Push with invalid secret ID.
 func TestSyncService_Push_InvalidSecretID(t *testing.T) {
-	pool := setupTestDB(t)
-	defer pool.Close()
+	ts := setupSyncServiceTest(t)
+	defer ts.pool.Close()
 
-	secretRepo := postgres.NewSecretRepository(pool)
-	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
-
-	ctx := context.Background()
-	userID := uuid.New()
-	ctx = context.WithValue(ctx, auth.UserIDContextKey, userID.String())
+	// Create test user.
+	user := createTestUser(context.Background(), t, ts.userRepo)
+	ctx := setupTestContext(user.ID, "")
 
 	nonce := []byte("nonce1234567")
 	encData := base64.StdEncoding.EncodeToString(append(nonce, []byte("data")...))
@@ -574,7 +565,7 @@ func TestSyncService_Push_InvalidSecretID(t *testing.T) {
 		},
 	}
 
-	resp, err := syncService.Push(ctx, req)
+	resp, err := ts.syncService.Push(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
@@ -643,4 +634,15 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// createTestUser is a helper function to create a test user in the database.
+func createTestUser(ctx context.Context, t *testing.T, repo *postgres.UserRepository) *repository.User {
+	t.Helper()
+
+	email := uuid.New().String() + "@example.com"
+	user, err := repo.CreateUser(ctx, email, []byte("hash"), []byte("verifier"), []byte("salt"))
+	require.NoError(t, err)
+
+	return user
 }

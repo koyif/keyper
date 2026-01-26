@@ -9,8 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewPool_Success(t *testing.T) {
-	cfg := &Config{
+// testConfig returns a standard test database configuration.
+func testConfig() *Config {
+	return &Config{
 		Host:              "localhost",
 		Port:              5432,
 		User:              "keyper",
@@ -22,7 +23,12 @@ func TestNewPool_Success(t *testing.T) {
 		MaxConnLifetime:   time.Hour,
 		MaxConnIdleTime:   30 * time.Minute,
 		HealthCheckPeriod: time.Minute,
+		SkipMigrations:    true,
 	}
+}
+
+func TestNewPool_Success(t *testing.T) {
+	cfg := testConfig()
 
 	ctx := context.Background()
 	pool, err := NewPool(ctx, cfg)
@@ -40,6 +46,7 @@ func TestNewPool_DefaultConfig(t *testing.T) {
 	cfg.User = "keyper"
 	cfg.Password = "keyper_dev_password"
 	cfg.Database = "keyper_test"
+	cfg.SkipMigrations = true
 
 	ctx := context.Background()
 	pool, err := NewPool(ctx, cfg)
@@ -62,17 +69,14 @@ func TestNewPool_NilConfig(t *testing.T) {
 }
 
 func TestNewPool_InvalidConfig(t *testing.T) {
-	cfg := &Config{
-		Host:              "invalid_host",
-		Port:              9999,
-		User:              "invalid_user",
-		Password:          "invalid_password",
-		Database:          "invalid_db",
-		SSLMode:           "disable",
-		MaxConns:          1,
-		MinConns:          1,
-		HealthCheckPeriod: time.Minute,
-	}
+	cfg := testConfig()
+	cfg.Host = "invalid_host"
+	cfg.Port = 9999
+	cfg.User = "invalid_user"
+	cfg.Password = "invalid_password"
+	cfg.Database = "invalid_db"
+	cfg.MaxConns = 1
+	cfg.MinConns = 1
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -83,16 +87,7 @@ func TestNewPool_InvalidConfig(t *testing.T) {
 }
 
 func TestPool_Health(t *testing.T) {
-	cfg := &Config{
-		Host:     "localhost",
-		Port:     5432,
-		User:     "keyper",
-		Password: "keyper_dev_password",
-		Database: "keyper_test",
-		SSLMode:  "disable",
-		MaxConns: 5,
-		MinConns: 1,
-	}
+	cfg := testConfig()
 
 	ctx := context.Background()
 	pool, err := NewPool(ctx, cfg)
@@ -106,16 +101,7 @@ func TestPool_Health(t *testing.T) {
 }
 
 func TestPool_Stats(t *testing.T) {
-	cfg := &Config{
-		Host:     "localhost",
-		Port:     5432,
-		User:     "keyper",
-		Password: "keyper_dev_password",
-		Database: "keyper_test",
-		SSLMode:  "disable",
-		MaxConns: 5,
-		MinConns: 1,
-	}
+	cfg := testConfig()
 
 	ctx := context.Background()
 	pool, err := NewPool(ctx, cfg)
@@ -131,16 +117,7 @@ func TestPool_Stats(t *testing.T) {
 }
 
 func TestPool_Close(t *testing.T) {
-	cfg := &Config{
-		Host:     "localhost",
-		Port:     5432,
-		User:     "keyper",
-		Password: "keyper_dev_password",
-		Database: "keyper_test",
-		SSLMode:  "disable",
-		MaxConns: 5,
-		MinConns: 1,
-	}
+	cfg := testConfig()
 
 	ctx := context.Background()
 	pool, err := NewPool(ctx, cfg)

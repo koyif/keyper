@@ -25,57 +25,13 @@ func NewSecretRepository(pool *pgxpool.Pool) *SecretRepository {
 	}
 }
 
-// Create creates a new secret and returns the created secret with generated ID and version 1.
-func (r *SecretRepository) Create(ctx context.Context, secret *repository.Secret) (*repository.Secret, error) {
-	query := `
-		INSERT INTO secrets (user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted)
-		VALUES ($1, $2, $3, $4, $5, $6, 1, false)
-		RETURNING id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted, created_at, updated_at
-	`
-
-	q := getQuerier(ctx, r.pool)
-	var result repository.Secret
-	err := q.QueryRow(
-		ctx,
-		query,
-		secret.UserID,
-		secret.Name,
-		secret.Type,
-		secret.EncryptedData,
-		secret.Nonce,
-		secret.Metadata,
-	).Scan(
-		&result.ID,
-		&result.UserID,
-		&result.Name,
-		&result.Type,
-		&result.EncryptedData,
-		&result.Nonce,
-		&result.Metadata,
-		&result.Version,
-		&result.IsDeleted,
-		&result.CreatedAt,
-		&result.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create secret: %w", err)
-	}
-
-	return &result, nil
-}
-
-// Get retrieves a secret by ID.
-// Returns repository.ErrNotFound if the secret doesn't exist or is deleted.
-func (r *SecretRepository) Get(ctx context.Context, id uuid.UUID) (*repository.Secret, error) {
-	query := `
-		SELECT id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted, created_at, updated_at
-		FROM secrets
-		WHERE id = $1 AND is_deleted = false
-	`
-
-	q := getQuerier(ctx, r.pool)
+// scanSecret scans a database row into a Secret struct.
+func scanSecret(scanner interface {
+	Scan(dest ...any) error
+},
+) (*repository.Secret, error) {
 	var secret repository.Secret
-	err := q.QueryRow(ctx, query, id).Scan(
+	err := scanner.Scan(
 		&secret.ID,
 		&secret.UserID,
 		&secret.Name,
@@ -89,13 +45,91 @@ func (r *SecretRepository) Get(ctx context.Context, id uuid.UUID) (*repository.S
 		&secret.UpdatedAt,
 	)
 	if err != nil {
+		return nil, err
+	}
+	return &secret, nil
+}
+
+// checkVersionConflict checks if a secret exists and returns appropriate error.
+// Returns ErrNotFound if secret doesn't exist, ErrVersionConflict if it exists.
+func (r *SecretRepository) checkVersionConflict(ctx context.Context, secretID uuid.UUID) error {
+	q := getQuerier(ctx, r.pool)
+	var exists bool
+	checkQuery := `SELECT EXISTS(SELECT 1 FROM secrets WHERE id = $1 AND is_deleted = false)`
+	if err := q.QueryRow(ctx, checkQuery, secretID).Scan(&exists); err != nil {
+		return fmt.Errorf("failed to check secret existence: %w", err)
+	}
+	if !exists {
+		return repository.ErrNotFound
+	}
+	return repository.ErrVersionConflict
+}
+
+// Create creates a new secret and returns the created secret with generated ID and version 1.
+func (r *SecretRepository) Create(ctx context.Context, secret *repository.Secret) (*repository.Secret, error) {
+	var query string
+	var args []any
+
+	// If ID is provided (not zero value), use it. Otherwise let database generate it.
+	if secret.ID != uuid.Nil {
+		query = `
+			INSERT INTO secrets (id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 1, false)
+			RETURNING id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted, created_at, updated_at
+		`
+		args = []any{
+			secret.ID,
+			secret.UserID,
+			secret.Name,
+			secret.Type,
+			secret.EncryptedData,
+			secret.Nonce,
+			secret.Metadata,
+		}
+	} else {
+		query = `
+			INSERT INTO secrets (user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted)
+			VALUES ($1, $2, $3, $4, $5, $6, 1, false)
+			RETURNING id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted, created_at, updated_at
+		`
+		args = []any{
+			secret.UserID,
+			secret.Name,
+			secret.Type,
+			secret.EncryptedData,
+			secret.Nonce,
+			secret.Metadata,
+		}
+	}
+
+	q := getQuerier(ctx, r.pool)
+	result, err := scanSecret(q.QueryRow(ctx, query, args...))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create secret: %w", err)
+	}
+
+	return result, nil
+}
+
+// Get retrieves a secret by ID.
+// Returns repository.ErrNotFound if the secret doesn't exist or is deleted.
+func (r *SecretRepository) Get(ctx context.Context, id uuid.UUID) (*repository.Secret, error) {
+	query := `
+		SELECT id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted, created_at, updated_at
+		FROM secrets
+		WHERE id = $1 AND is_deleted = false
+	`
+
+	q := getQuerier(ctx, r.pool)
+	secret, err := scanSecret(q.QueryRow(ctx, query, id))
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get secret: %w", err)
 	}
 
-	return &secret, nil
+	return secret, nil
 }
 
 // Update updates an existing secret using optimistic locking.
@@ -112,8 +146,7 @@ func (r *SecretRepository) Update(ctx context.Context, secret *repository.Secret
 	`
 
 	q := getQuerier(ctx, r.pool)
-	var result repository.Secret
-	err := q.QueryRow(
+	result, err := scanSecret(q.QueryRow(
 		ctx,
 		query,
 		secret.Name,
@@ -123,36 +156,15 @@ func (r *SecretRepository) Update(ctx context.Context, secret *repository.Secret
 		secret.Metadata,
 		secret.ID,
 		secret.Version,
-	).Scan(
-		&result.ID,
-		&result.UserID,
-		&result.Name,
-		&result.Type,
-		&result.EncryptedData,
-		&result.Nonce,
-		&result.Metadata,
-		&result.Version,
-		&result.IsDeleted,
-		&result.CreatedAt,
-		&result.UpdatedAt,
-	)
+	))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Check if secret exists to differentiate between not found and version conflict
-			var exists bool
-			checkQuery := `SELECT EXISTS(SELECT 1 FROM secrets WHERE id = $1 AND is_deleted = false)`
-			if err := q.QueryRow(ctx, checkQuery, secret.ID).Scan(&exists); err != nil {
-				return nil, fmt.Errorf("failed to check secret existence: %w", err)
-			}
-			if !exists {
-				return nil, repository.ErrNotFound
-			}
-			return nil, repository.ErrVersionConflict
+			return nil, r.checkVersionConflict(ctx, secret.ID)
 		}
 		return nil, fmt.Errorf("failed to update secret: %w", err)
 	}
 
-	return &result, nil
+	return result, nil
 }
 
 // Delete performs a soft delete by setting is_deleted=true.
@@ -172,19 +184,24 @@ func (r *SecretRepository) Delete(ctx context.Context, id uuid.UUID, currentVers
 	}
 
 	if result.RowsAffected() == 0 {
-		// Check if secret exists to differentiate between not found and version conflict
-		var exists bool
-		checkQuery := `SELECT EXISTS(SELECT 1 FROM secrets WHERE id = $1 AND is_deleted = false)`
-		if err := q.QueryRow(ctx, checkQuery, id).Scan(&exists); err != nil {
-			return fmt.Errorf("failed to check secret existence: %w", err)
-		}
-		if !exists {
-			return repository.ErrNotFound
-		}
-		return repository.ErrVersionConflict
+		return r.checkVersionConflict(ctx, id)
 	}
 
 	return nil
+}
+
+// CountByUser returns the count of non-deleted secrets for a user.
+func (r *SecretRepository) CountByUser(ctx context.Context, userID uuid.UUID) (int32, error) {
+	query := `SELECT COUNT(*) FROM secrets WHERE user_id = $1 AND is_deleted = false`
+
+	q := getQuerier(ctx, r.pool)
+	var count int32
+	err := q.QueryRow(ctx, query, userID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count secrets by user: %w", err)
+	}
+
+	return count, nil
 }
 
 // ListByUser retrieves all non-deleted secrets for a user.
@@ -214,23 +231,11 @@ func (r *SecretRepository) ListByUser(ctx context.Context, userID uuid.UUID, lim
 
 	var secrets []*repository.Secret
 	for rows.Next() {
-		var secret repository.Secret
-		if err := rows.Scan(
-			&secret.ID,
-			&secret.UserID,
-			&secret.Name,
-			&secret.Type,
-			&secret.EncryptedData,
-			&secret.Nonce,
-			&secret.Metadata,
-			&secret.Version,
-			&secret.IsDeleted,
-			&secret.CreatedAt,
-			&secret.UpdatedAt,
-		); err != nil {
+		secret, err := scanSecret(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
 		}
-		secrets = append(secrets, &secret)
+		secrets = append(secrets, secret)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -265,23 +270,11 @@ func (r *SecretRepository) ListModifiedSince(ctx context.Context, userID uuid.UU
 
 	var secrets []*repository.Secret
 	for rows.Next() {
-		var secret repository.Secret
-		if err := rows.Scan(
-			&secret.ID,
-			&secret.UserID,
-			&secret.Name,
-			&secret.Type,
-			&secret.EncryptedData,
-			&secret.Nonce,
-			&secret.Metadata,
-			&secret.Version,
-			&secret.IsDeleted,
-			&secret.CreatedAt,
-			&secret.UpdatedAt,
-		); err != nil {
+		secret, err := scanSecret(rows)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
 		}
-		secrets = append(secrets, &secret)
+		secrets = append(secrets, secret)
 	}
 
 	if err := rows.Err(); err != nil {
