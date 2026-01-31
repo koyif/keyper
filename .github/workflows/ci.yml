@@ -77,6 +77,12 @@ jobs:
       - name: Run database migrations
         env:
           DATABASE_URL: "postgresql://keyper:keyper_test_password@localhost:5432/keyper_test?sslmode=disable"
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: keyper
+          POSTGRES_PASSWORD: keyper_test_password
+          POSTGRES_DB: keyper_test
+          POSTGRES_SSL_MODE: disable
         run: |
           make migrate-up
 
