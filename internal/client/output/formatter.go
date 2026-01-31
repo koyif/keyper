@@ -43,6 +43,7 @@ func (f *JSONFormatter) Format(data interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal JSON: %w", err)
 	}
+
 	return string(bytes), nil
 }
 
@@ -52,6 +53,7 @@ func (f *JSONFormatter) FormatList(data interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal JSON: %w", err)
 	}
+
 	return string(bytes), nil
 }
 
@@ -69,6 +71,7 @@ func (f *YAMLFormatter) Format(data interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal YAML: %w", err)
 	}
+
 	return string(bytes), nil
 }
 
@@ -78,5 +81,6 @@ func (f *YAMLFormatter) FormatList(data interface{}) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal YAML: %w", err)
 	}
+
 	return string(bytes), nil
 }

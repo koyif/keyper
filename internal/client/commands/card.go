@@ -93,13 +93,17 @@ func validateCardNumber(cardNumber string) error {
 // formatCardNumber formats a card number as XXXX XXXX XXXX XXXX
 func formatCardNumber(cardNumber string) string {
 	cleaned := regexp.MustCompile(`[\s-]`).ReplaceAllString(cardNumber, "")
+
 	var formatted strings.Builder
+
 	for i, c := range cleaned {
 		if i > 0 && i%4 == 0 {
 			formatted.WriteString(" ")
 		}
+
 		formatted.WriteRune(c)
 	}
+
 	return formatted.String()
 }
 
@@ -109,6 +113,7 @@ func getLast4Digits(cardNumber string) string {
 	if len(cleaned) < 4 {
 		return cleaned
 	}
+
 	return cleaned[len(cleaned)-4:]
 }
 
@@ -140,129 +145,20 @@ func newCardAddCmd(getCfg func() *config.Config, getSess func() *session.Session
 
 			// Use flags if provided, otherwise prompt interactively
 			if nameFlag != "" {
-				name = nameFlag
-				cardholder = cardholderFlag
-				number = numberFlag
-				expiryMonth = expiryMonthFlag
-				expiryYear = expiryYearFlag
-				cvv = cvvFlag
-				pin = pinFlag
-				bankName = bankNameFlag
-				notes = notesFlag
+				name, cardholder, number = nameFlag, cardholderFlag, numberFlag
+				expiryMonth, expiryYear = expiryMonthFlag, expiryYearFlag
+				cvv, pin, bankName, notes = cvvFlag, pinFlag, bankNameFlag, notesFlag
 
 				// Validate card number
 				if err := validateCardNumber(number); err != nil {
 					return fmt.Errorf("invalid card number: %w", err)
 				}
 			} else {
-				// Interactive prompts
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewInput().
-							Title("Name").
-							Description("A friendly name for this card (e.g., 'Chase Visa')").
-							Value(&name).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("name is required")
-								}
-								return nil
-							}),
+				var err error
 
-						huh.NewInput().
-							Title("Cardholder Name").
-							Description("Name as it appears on the card").
-							Value(&cardholder).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("cardholder name is required")
-								}
-								return nil
-							}),
-
-						huh.NewInput().
-							Title("Card Number").
-							Description("Full card number (spaces optional)").
-							Value(&number).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("card number is required")
-								}
-								return validateCardNumber(s)
-							}),
-
-						huh.NewInput().
-							Title("Expiry Month (MM)").
-							Description("Two-digit month (e.g., 01, 12)").
-							Value(&expiryMonth).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("expiry month is required")
-								}
-								month, err := strconv.Atoi(s)
-								if err != nil || month < 1 || month > 12 {
-									return fmt.Errorf("must be 01-12")
-								}
-								return nil
-							}),
-
-						huh.NewInput().
-							Title("Expiry Year (YYYY)").
-							Description("Four-digit year (e.g., 2025)").
-							Value(&expiryYear).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("expiry year is required")
-								}
-								year, err := strconv.Atoi(s)
-								if err != nil || len(s) != 4 {
-									return fmt.Errorf("must be a 4-digit year")
-								}
-								currentYear := time.Now().Year()
-								if year < currentYear {
-									return fmt.Errorf("card has expired")
-								}
-								return nil
-							}),
-
-						huh.NewInput().
-							Title("CVV").
-							Description("3 or 4 digit security code").
-							Value(&cvv).
-							EchoMode(huh.EchoModePassword).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("CVV is required")
-								}
-								if len(s) < 3 || len(s) > 4 {
-									return fmt.Errorf("CVV must be 3 or 4 digits")
-								}
-								if _, err := strconv.Atoi(s); err != nil {
-									return fmt.Errorf("CVV must be numeric")
-								}
-								return nil
-							}),
-
-						huh.NewInput().
-							Title("PIN (optional)").
-							Description("Card PIN if applicable").
-							Value(&pin).
-							EchoMode(huh.EchoModePassword),
-
-						huh.NewInput().
-							Title("Bank Name (optional)").
-							Description("Issuing bank name").
-							Value(&bankName),
-
-						huh.NewInput().
-							Title("Notes (optional)").
-							Description("Additional notes").
-							Value(&notes),
-					),
-				)
-
-				if err := form.Run(); err != nil {
-					return fmt.Errorf("operation cancelled: %w", err)
+				name, cardholder, number, expiryMonth, expiryYear, cvv, pin, bankName, notes, err = promptForCardInput()
+				if err != nil {
+					return err
 				}
 			}
 
@@ -303,6 +199,7 @@ func newCardAddCmd(getCfg func() *config.Config, getSess func() *session.Session
 				BankName:    bankName,
 				Notes:       notes,
 			}
+
 			metadataJSON, err := json.Marshal(cardMeta)
 			if err != nil {
 				return fmt.Errorf("failed to marshal metadata: %w", err)
@@ -332,15 +229,18 @@ func newCardAddCmd(getCfg func() *config.Config, getSess func() *session.Session
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to store card: %w", err)
 				}
 
 				logrus.Debugf("Card created: id=%s, name=%s", secret.ID, secret.Name)
 				fmt.Printf("✓ Card '%s' added successfully\n", name)
 				fmt.Printf("  ID: %s\n", secret.ID)
+
 				if bankName != "" {
 					fmt.Printf("  Bank: %s\n", bankName)
 				}
+
 				fmt.Printf("  Last 4 digits: •••• %s\n", cardMeta.Last4Digits)
 				fmt.Printf("  Status: pending sync\n")
 
@@ -409,9 +309,11 @@ func newCardGetCmd(_ func() *config.Config, getSess func() *session.Session, get
 				fmt.Printf("Card Number: %s\n", cardData.CardNumber)
 				fmt.Printf("Expiry: %s/%s\n", cardData.ExpiryMonth, cardData.ExpiryYear)
 				fmt.Printf("CVV: %s\n", cardData.Cvv)
+
 				if cardData.Pin != "" {
 					fmt.Printf("PIN: %s\n", cardData.Pin)
 				}
+
 				if cardData.BankName != "" {
 					fmt.Printf("Bank: %s\n", cardData.BankName)
 				}
@@ -466,6 +368,7 @@ func newCardListCmd(_ func() *config.Config, getSess func() *session.Session, ge
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to list cards: %w", err)
 				}
 
@@ -485,27 +388,13 @@ func newCardListCmd(_ func() *config.Config, getSess func() *session.Session, ge
 					} else if secret.SyncStatus == storage.SyncStatusConflict {
 						status = "⚠"
 					}
+
 					if secret.IsDeleted {
 						status = "🗑"
 					}
 
 					// Get metadata for display
-					var cardMeta CardMetadata
-					info := ""
-					if secret.Metadata != "" {
-						if err := json.Unmarshal([]byte(secret.Metadata), &cardMeta); err == nil {
-							parts := []string{}
-							if cardMeta.Last4Digits != "" {
-								parts = append(parts, "•••• "+cardMeta.Last4Digits)
-							}
-							if cardMeta.BankName != "" {
-								parts = append(parts, cardMeta.BankName)
-							}
-							if len(parts) > 0 {
-								info = " (" + strings.Join(parts, ", ") + ")"
-							}
-						}
-					}
+					info := formatCardInfo(secret.Metadata)
 
 					fmt.Printf("%s %-36s  %s%s\n", status, secret.ID[:8]+"...", secret.Name, info)
 				}
@@ -575,6 +464,7 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 				if secret.Metadata != "" {
 					json.Unmarshal([]byte(secret.Metadata), &cardMeta)
 				}
+
 				newNotes := cardMeta.Notes
 
 				form := huh.NewForm(
@@ -586,6 +476,7 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 								if len(s) == 0 {
 									return fmt.Errorf("name is required")
 								}
+
 								return nil
 							}),
 
@@ -596,6 +487,7 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 								if len(s) == 0 {
 									return fmt.Errorf("cardholder name is required")
 								}
+
 								return nil
 							}),
 
@@ -606,6 +498,7 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 								if len(s) == 0 {
 									return fmt.Errorf("card number is required")
 								}
+
 								return validateCardNumber(s)
 							}),
 
@@ -616,10 +509,12 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 								if len(s) == 0 {
 									return fmt.Errorf("expiry month is required")
 								}
+
 								month, err := strconv.Atoi(s)
 								if err != nil || month < 1 || month > 12 {
 									return fmt.Errorf("must be 01-12")
 								}
+
 								return nil
 							}),
 
@@ -630,10 +525,12 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 								if len(s) == 0 {
 									return fmt.Errorf("expiry year is required")
 								}
+
 								_, err := strconv.Atoi(s)
 								if err != nil || len(s) != 4 {
 									return fmt.Errorf("must be a 4-digit year")
 								}
+
 								return nil
 							}),
 
@@ -645,9 +542,11 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 								if len(s) == 0 {
 									return fmt.Errorf("CVV is required")
 								}
+
 								if len(s) < 3 || len(s) > 4 {
 									return fmt.Errorf("CVV must be 3 or 4 digits")
 								}
+
 								return nil
 							}),
 
@@ -697,6 +596,7 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 				cardMeta.Last4Digits = getLast4Digits(newNumber)
 				cardMeta.BankName = newBankName
 				cardMeta.Notes = newNotes
+
 				metadataJSON, err := json.Marshal(cardMeta)
 				if err != nil {
 					return fmt.Errorf("failed to marshal metadata: %w", err)
@@ -716,6 +616,7 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to update card: %w", err)
 				}
 
@@ -772,6 +673,7 @@ func newCardDeleteCmd(_ func() *config.Config, getSess func() *session.Session, 
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to delete card: %w", err)
 				}
 
@@ -787,4 +689,156 @@ func newCardDeleteCmd(_ func() *config.Config, getSess func() *session.Session, 
 	cmd.Flags().BoolVarP(&noConfirm, "yes", "y", false, "Skip confirmation prompt")
 
 	return cmd
+}
+
+// formatCardInfo extracts and formats card metadata for display
+func formatCardInfo(metadata string) string {
+	if metadata == "" {
+		return ""
+	}
+
+	var cardMeta CardMetadata
+	if err := json.Unmarshal([]byte(metadata), &cardMeta); err != nil {
+		return ""
+	}
+
+	var parts []string
+	if cardMeta.Last4Digits != "" {
+		parts = append(parts, "•••• "+cardMeta.Last4Digits)
+	}
+
+	if cardMeta.BankName != "" {
+		parts = append(parts, cardMeta.BankName)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+// promptForCardInput prompts user for card details interactively
+func promptForCardInput() (name, cardholder, number, expiryMonth, expiryYear, cvv, pin, bankName, notes string, err error) {
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Name").
+				Description("A friendly name for this card (e.g., 'Chase Visa')").
+				Value(&name).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("name is required")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Cardholder Name").
+				Description("Name as it appears on the card").
+				Value(&cardholder).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("cardholder name is required")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Card Number").
+				Description("Full card number (spaces optional)").
+				Value(&number).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("card number is required")
+					}
+
+					return validateCardNumber(s)
+				}),
+
+			huh.NewInput().
+				Title("Expiry Month (MM)").
+				Description("Two-digit month (e.g., 01, 12)").
+				Value(&expiryMonth).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("expiry month is required")
+					}
+
+					month, err := strconv.Atoi(s)
+					if err != nil || month < 1 || month > 12 {
+						return fmt.Errorf("must be 01-12")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Expiry Year (YYYY)").
+				Description("Four-digit year (e.g., 2025)").
+				Value(&expiryYear).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("expiry year is required")
+					}
+
+					year, err := strconv.Atoi(s)
+					if err != nil || len(s) != 4 {
+						return fmt.Errorf("must be a 4-digit year")
+					}
+
+					currentYear := time.Now().Year()
+					if year < currentYear {
+						return fmt.Errorf("card has expired")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("CVV").
+				Description("3 or 4 digit security code").
+				Value(&cvv).
+				EchoMode(huh.EchoModePassword).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("CVV is required")
+					}
+
+					if len(s) < 3 || len(s) > 4 {
+						return fmt.Errorf("CVV must be 3 or 4 digits")
+					}
+
+					if _, err := strconv.Atoi(s); err != nil {
+						return fmt.Errorf("CVV must be numeric")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("PIN (optional)").
+				Description("Card PIN if applicable").
+				Value(&pin).
+				EchoMode(huh.EchoModePassword),
+
+			huh.NewInput().
+				Title("Bank Name (optional)").
+				Description("Issuing bank name").
+				Value(&bankName),
+
+			huh.NewInput().
+				Title("Notes (optional)").
+				Description("Additional notes").
+				Value(&notes),
+		),
+	)
+
+	if err = form.Run(); err != nil {
+		return "", "", "", "", "", "", "", "", "", fmt.Errorf("operation cancelled: %w", err)
+	}
+
+	return name, cardholder, number, expiryMonth, expiryYear, cvv, pin, bankName, notes, nil
 }

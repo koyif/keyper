@@ -31,7 +31,9 @@ func (r *UserRepository) CreateUser(ctx context.Context, email string, passwordH
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	var user repository.User
+
 	err := q.QueryRow(ctx, query, email, passwordHash, encryptionKeyVerifier, salt).Scan(
 		&user.ID,
 		&user.Email,
@@ -47,6 +49,7 @@ func (r *UserRepository) CreateUser(ctx context.Context, email string, passwordH
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return nil, fmt.Errorf("user with email %s: %w", email, repository.ErrDuplicate)
 		}
+
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
@@ -62,7 +65,9 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (*rep
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	var user repository.User
+
 	err := q.QueryRow(ctx, query, email).Scan(
 		&user.ID,
 		&user.Email,
@@ -76,6 +81,7 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (*rep
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get user by email: %w", err)
 	}
 
@@ -91,7 +97,9 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*reposi
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	var user repository.User
+
 	err := q.QueryRow(ctx, query, id).Scan(
 		&user.ID,
 		&user.Email,
@@ -105,6 +113,7 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*reposi
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get user by ID: %w", err)
 	}
 
@@ -119,12 +128,14 @@ func (r *UserRepository) Update(ctx context.Context, user *repository.User) erro
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	result, err := q.Exec(ctx, query, user.ID, user.Email, user.PasswordHash, user.EncryptionKeyVerifier, user.Salt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return fmt.Errorf("user with email %s: %w", user.Email, repository.ErrDuplicate)
 		}
+
 		return fmt.Errorf("failed to update user: %w", err)
 	}
 

@@ -55,6 +55,7 @@ func (m *JWTManager) GenerateAccessToken(userID uuid.UUID, deviceID string) (str
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
 	tokenString, err := token.SignedString(m.secretKey)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("failed to sign access token: %w", err)
@@ -80,6 +81,7 @@ func (m *JWTManager) GenerateRefreshToken(userID uuid.UUID, deviceID string) (st
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
 	tokenString, err := token.SignedString(m.secretKey)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("failed to sign refresh token: %w", err)
@@ -111,13 +113,13 @@ func (m *JWTManager) ValidateToken(tokenString string) (*CustomClaims, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
+
 			return m.secretKey, nil
 		},
 		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
 		jwt.WithIssuer(TokenIssuer),
 		jwt.WithExpirationRequired(),
 	)
-
 	if err != nil {
 		switch {
 		case errors.Is(err, jwt.ErrTokenMalformed):

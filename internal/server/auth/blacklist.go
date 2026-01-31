@@ -33,6 +33,7 @@ func NewTokenBlacklist(cleanupInterval time.Duration) *TokenBlacklist {
 func (tb *TokenBlacklist) Add(token string, expiresAt time.Time) {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
+
 	tb.blacklist[token] = expiresAt
 }
 
@@ -58,6 +59,7 @@ func (tb *TokenBlacklist) IsBlacklisted(token string) bool {
 func (tb *TokenBlacklist) Remove(token string) {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
+
 	delete(tb.blacklist, token)
 }
 
@@ -98,5 +100,6 @@ func (tb *TokenBlacklist) Stop() {
 func (tb *TokenBlacklist) Size() int {
 	tb.mu.RLock()
 	defer tb.mu.RUnlock()
+
 	return len(tb.blacklist)
 }

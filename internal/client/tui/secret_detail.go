@@ -155,8 +155,10 @@ func (s *SecretDetailScreen) renderDecryptedData() string {
 			lines = append(lines, inputLabelStyle.Render("Username:"))
 			lines = append(lines, "  "+username)
 		}
+
 		if password, ok := s.decryptedData["password"].(string); ok {
 			lines = append(lines, "")
+
 			lines = append(lines, inputLabelStyle.Render("Password:"))
 			if s.showPassword {
 				lines = append(lines, "  "+password)
@@ -164,11 +166,13 @@ func (s *SecretDetailScreen) renderDecryptedData() string {
 				lines = append(lines, "  "+strings.Repeat("•", len(password)))
 			}
 		}
+
 		if url, ok := s.decryptedData["url"].(string); ok && url != "" {
 			lines = append(lines, "")
 			lines = append(lines, inputLabelStyle.Render("URL:"))
 			lines = append(lines, "  "+url)
 		}
+
 		if notes, ok := s.decryptedData["notes"].(string); ok && notes != "" {
 			lines = append(lines, "")
 			lines = append(lines, inputLabelStyle.Render("Notes:"))
@@ -184,29 +188,24 @@ func (s *SecretDetailScreen) renderDecryptedData() string {
 	case pb.SecretType_SECRET_TYPE_BANK_CARD:
 		if cardNumber, ok := s.decryptedData["card_number"].(string); ok {
 			lines = append(lines, inputLabelStyle.Render("Card Number:"))
-			if s.showPassword {
-				lines = append(lines, "  "+cardNumber)
-			} else {
-				// Mask card number
-				if len(cardNumber) > 4 {
-					lines = append(lines, "  "+strings.Repeat("*", len(cardNumber)-4)+cardNumber[len(cardNumber)-4:])
-				} else {
-					lines = append(lines, "  "+strings.Repeat("*", len(cardNumber)))
-				}
-			}
+			lines = append(lines, "  "+s.formatCardNumber(cardNumber))
 		}
+
 		if cardHolder, ok := s.decryptedData["card_holder"].(string); ok {
 			lines = append(lines, "")
 			lines = append(lines, inputLabelStyle.Render("Card Holder:"))
 			lines = append(lines, "  "+cardHolder)
 		}
+
 		if expiry, ok := s.decryptedData["expiry"].(string); ok {
 			lines = append(lines, "")
 			lines = append(lines, inputLabelStyle.Render("Expiry:"))
 			lines = append(lines, "  "+expiry)
 		}
+
 		if cvv, ok := s.decryptedData["cvv"].(string); ok {
 			lines = append(lines, "")
+
 			lines = append(lines, inputLabelStyle.Render("CVV:"))
 			if s.showPassword {
 				lines = append(lines, "  "+cvv)
@@ -258,6 +257,7 @@ func (s *SecretDetailScreen) deleteSecretCmd() tea.Cmd {
 		if err := s.repo.Delete(s.ctx, s.secret.ID); err != nil {
 			return errorMsg{fmt.Errorf("failed to delete secret: %w", err)}
 		}
+
 		return deletedMsg{}
 	}
 }
@@ -283,3 +283,16 @@ type decryptedMsg struct {
 }
 
 type deletedMsg struct{}
+
+// formatCardNumber masks or shows card number based on showPassword setting
+func (s *SecretDetailScreen) formatCardNumber(cardNumber string) string {
+	if s.showPassword {
+		return cardNumber
+	}
+
+	if len(cardNumber) > 4 {
+		return strings.Repeat("*", len(cardNumber)-4) + cardNumber[len(cardNumber)-4:]
+	}
+
+	return strings.Repeat("*", len(cardNumber))
+}

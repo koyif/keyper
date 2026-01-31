@@ -51,13 +51,15 @@ func (s *SecretsService) CreateSecret(ctx context.Context, req *pb.CreateSecretR
 	}
 
 	if req.Title == "" {
-		return nil, status.Error(codes.InvalidArgument, "title is required")
+		return nil, status.Error(codes.InvalidArgument, "title is required") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
+
 	if req.EncryptedData == "" {
-		return nil, status.Error(codes.InvalidArgument, "encrypted_data is required")
+		return nil, status.Error(codes.InvalidArgument, "encrypted_data is required") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
+
 	if req.Type == pb.SecretType_SECRET_TYPE_UNSPECIFIED {
-		return nil, status.Error(codes.InvalidArgument, "secret type must be specified")
+		return nil, status.Error(codes.InvalidArgument, "secret type must be specified") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
 
 	encryptedBytes, err := base64.StdEncoding.DecodeString(req.EncryptedData)
@@ -66,8 +68,9 @@ func (s *SecretsService) CreateSecret(ctx context.Context, req *pb.CreateSecretR
 	}
 
 	if len(encryptedBytes) < s.limits.NonceSize {
-		return nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)")
+		return nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
+
 	nonce := encryptedBytes[:s.limits.NonceSize]
 	ciphertext := encryptedBytes[s.limits.NonceSize:]
 
@@ -111,7 +114,7 @@ func (s *SecretsService) GetSecret(ctx context.Context, req *pb.GetSecretRequest
 	}
 
 	if req.SecretId == "" {
-		return nil, status.Error(codes.InvalidArgument, "secret_id is required")
+		return nil, status.Error(codes.InvalidArgument, "secret_id is required") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
 
 	secretID, err := uuid.Parse(req.SecretId)
@@ -122,13 +125,14 @@ func (s *SecretsService) GetSecret(ctx context.Context, req *pb.GetSecretRequest
 	secret, err := s.secretRepo.Get(ctx, secretID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "secret not found")
+			return nil, status.Error(codes.NotFound, "secret not found") //nolint:wrapcheck // gRPC status errors should not be wrapped
 		}
+
 		return nil, status.Errorf(codes.Internal, "failed to retrieve secret: %v", err)
 	}
 
 	if secret.UserID != userID {
-		return nil, status.Error(codes.PermissionDenied, "access denied")
+		return nil, status.Error(codes.PermissionDenied, "access denied") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
 
 	pbSecret, err := convertSecretToProto(secret)
@@ -148,16 +152,19 @@ func (s *SecretsService) UpdateSecret(ctx context.Context, req *pb.UpdateSecretR
 	}
 
 	if req.SecretId == "" {
-		return nil, status.Error(codes.InvalidArgument, "secret_id is required")
+		return nil, status.Error(codes.InvalidArgument, "secret_id is required") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
+
 	if req.Title == "" {
-		return nil, status.Error(codes.InvalidArgument, "title is required")
+		return nil, status.Error(codes.InvalidArgument, "title is required") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
+
 	if req.EncryptedData == "" {
-		return nil, status.Error(codes.InvalidArgument, "encrypted_data is required")
+		return nil, status.Error(codes.InvalidArgument, "encrypted_data is required") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
+
 	if req.Version <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "version must be provided for optimistic locking")
+		return nil, status.Error(codes.InvalidArgument, "version must be provided for optimistic locking") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
 
 	secretID, err := uuid.Parse(req.SecretId)
@@ -168,13 +175,14 @@ func (s *SecretsService) UpdateSecret(ctx context.Context, req *pb.UpdateSecretR
 	existing, err := s.secretRepo.Get(ctx, secretID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "secret not found")
+			return nil, status.Error(codes.NotFound, "secret not found") //nolint:wrapcheck // gRPC status errors should not be wrapped
 		}
+
 		return nil, status.Errorf(codes.Internal, "failed to retrieve secret: %v", err)
 	}
 
 	if existing.UserID != userID {
-		return nil, status.Error(codes.PermissionDenied, "access denied")
+		return nil, status.Error(codes.PermissionDenied, "access denied") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
 
 	encryptedBytes, err := base64.StdEncoding.DecodeString(req.EncryptedData)
@@ -183,8 +191,9 @@ func (s *SecretsService) UpdateSecret(ctx context.Context, req *pb.UpdateSecretR
 	}
 
 	if len(encryptedBytes) < s.limits.NonceSize {
-		return nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)")
+		return nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
+
 	nonce := encryptedBytes[:s.limits.NonceSize]
 	ciphertext := encryptedBytes[s.limits.NonceSize:]
 
@@ -205,11 +214,13 @@ func (s *SecretsService) UpdateSecret(ctx context.Context, req *pb.UpdateSecretR
 	updated, err := s.secretRepo.Update(ctx, existing)
 	if err != nil {
 		if errors.Is(err, repository.ErrVersionConflict) {
-			return nil, status.Error(codes.FailedPrecondition, "version conflict: secret was modified by another process")
+			return nil, status.Error(codes.FailedPrecondition, "version conflict: secret was modified by another process") //nolint:wrapcheck // gRPC status errors should not be wrapped
 		}
+
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "secret not found")
+			return nil, status.Error(codes.NotFound, "secret not found") //nolint:wrapcheck // gRPC status errors should not be wrapped
 		}
+
 		return nil, status.Errorf(codes.Internal, "failed to update secret: %v", err)
 	}
 
@@ -231,7 +242,7 @@ func (s *SecretsService) DeleteSecret(ctx context.Context, req *pb.DeleteSecretR
 	}
 
 	if req.SecretId == "" {
-		return nil, status.Error(codes.InvalidArgument, "secret_id is required")
+		return nil, status.Error(codes.InvalidArgument, "secret_id is required") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
 
 	secretID, err := uuid.Parse(req.SecretId)
@@ -242,22 +253,25 @@ func (s *SecretsService) DeleteSecret(ctx context.Context, req *pb.DeleteSecretR
 	secret, err := s.secretRepo.Get(ctx, secretID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "secret not found")
+			return nil, status.Error(codes.NotFound, "secret not found") //nolint:wrapcheck // gRPC status errors should not be wrapped
 		}
+
 		return nil, status.Errorf(codes.Internal, "failed to retrieve secret: %v", err)
 	}
 
 	if secret.UserID != userID {
-		return nil, status.Error(codes.PermissionDenied, "access denied")
+		return nil, status.Error(codes.PermissionDenied, "access denied") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
 
 	if err := s.secretRepo.Delete(ctx, secretID, secret.Version); err != nil {
 		if errors.Is(err, repository.ErrVersionConflict) {
-			return nil, status.Error(codes.FailedPrecondition, "version conflict: secret was modified by another process")
+			return nil, status.Error(codes.FailedPrecondition, "version conflict: secret was modified by another process") //nolint:wrapcheck // gRPC status errors should not be wrapped
 		}
+
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, status.Error(codes.NotFound, "secret not found")
+			return nil, status.Error(codes.NotFound, "secret not found") //nolint:wrapcheck // gRPC status errors should not be wrapped
 		}
+
 		return nil, status.Errorf(codes.Internal, "failed to delete secret: %v", err)
 	}
 
@@ -276,6 +290,7 @@ func (s *SecretsService) ListSecrets(ctx context.Context, req *pb.ListSecretsReq
 	if limit <= 0 {
 		limit = s.limits.DefaultPageSize
 	}
+
 	if limit > s.limits.MaxPageSize {
 		limit = s.limits.MaxPageSize
 	}
@@ -291,6 +306,7 @@ func (s *SecretsService) ListSecrets(ctx context.Context, req *pb.ListSecretsReq
 	}
 
 	var nextPageToken string
+
 	if len(secrets) > limit {
 		secrets = secrets[:limit]
 		nextPageToken = fmt.Sprintf("%d", offset+limit)
@@ -302,6 +318,7 @@ func (s *SecretsService) ListSecrets(ctx context.Context, req *pb.ListSecretsReq
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to convert secret: %v", err)
 		}
+
 		pbSecrets = append(pbSecrets, pbSecret)
 	}
 
@@ -348,6 +365,7 @@ func (s *SecretsService) SearchSecrets(ctx context.Context, req *pb.SearchSecret
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to convert secret: %v", err)
 		}
+
 		pbSecrets = append(pbSecrets, pbSecret)
 	}
 

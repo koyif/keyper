@@ -137,6 +137,7 @@ func (s *RegisterScreen) Update(msg tea.Msg) (*RegisterScreen, tea.Cmd) {
 	case registerErrorMsg:
 		s.loading = false
 		s.errorMsg = msg.Error()
+
 		return s, nil
 	}
 
@@ -294,18 +295,22 @@ func (s *RegisterScreen) performRegister() tea.Cmd {
 		s.errorMsg = "Username is required"
 		return nil
 	}
+
 	if len(username) < 3 {
 		s.errorMsg = "Username must be at least 3 characters"
 		return nil
 	}
+
 	if password == "" {
 		s.errorMsg = "Password is required"
 		return nil
 	}
+
 	if len(password) < 8 {
 		s.errorMsg = "Password must be at least 8 characters"
 		return nil
 	}
+
 	if password != confirmPassword {
 		s.errorMsg = "Passwords do not match"
 		return nil
@@ -331,6 +336,7 @@ func (s *RegisterScreen) performRegister() tea.Cmd {
 			if err != nil {
 				return registerErrorMsg{fmt.Errorf("failed to generate auth salt: %w", err)}
 			}
+
 			authHash := crypto.HashMasterPassword(password, authSalt)
 
 			// Generate encryption key verifier
@@ -347,6 +353,7 @@ func (s *RegisterScreen) performRegister() tea.Cmd {
 			defer conn.Close()
 
 			client := pb.NewAuthServiceClient(conn)
+
 			ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
 			defer cancel()
 

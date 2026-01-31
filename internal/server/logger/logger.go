@@ -28,8 +28,10 @@ var (
 // Initialize sets up the global logger based on the environment.
 // env should be "production" or "development".
 func Initialize(env string) error {
-	var logger *zap.Logger
-	var err error
+	var (
+		logger *zap.Logger
+		err    error
+	)
 
 	if env == "production" {
 		// Production config: JSON encoding, InfoLevel and above
@@ -62,6 +64,7 @@ func Initialize(env string) error {
 	}
 
 	globalLogger = logger
+
 	return nil
 }
 
@@ -72,6 +75,7 @@ func Get() *zap.Logger {
 		// Fallback to a no-op logger
 		return zap.NewNop()
 	}
+
 	return globalLogger
 }
 
@@ -154,5 +158,6 @@ func GetEnv() string {
 	if env == "" {
 		env = "development"
 	}
+
 	return env
 }

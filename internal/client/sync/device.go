@@ -31,8 +31,10 @@ func LoadOrCreateDeviceID(cfg *config.Config) (string, error) {
 	// Check if device ID exists in the config file
 	v := viper.New()
 	v.SetConfigType("yaml")
+
 	if _, err := os.Stat(cfg.ConfigPath); err == nil {
 		v.SetConfigFile(cfg.ConfigPath)
+
 		if err := v.ReadInConfig(); err == nil {
 			if existingID := v.GetString("device_id"); existingID != "" {
 				cfg.DeviceID = existingID
@@ -70,6 +72,7 @@ func saveDeviceID(cfg *config.Config, deviceID string) error {
 	if _, err := os.Stat(cfg.ConfigPath); err == nil {
 		// Read existing config
 		v.SetConfigFile(cfg.ConfigPath)
+
 		if err := v.ReadInConfig(); err != nil {
 			return fmt.Errorf("failed to read config file: %w", err)
 		}

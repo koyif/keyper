@@ -40,6 +40,7 @@ func (db *TestDB) Truncate(tables ...string) {
 	db.t.Helper()
 
 	ctx := context.Background()
+
 	for _, table := range tables {
 		query := fmt.Sprintf("TRUNCATE TABLE %s CASCADE", table)
 		_, err := db.pool.Exec(ctx, query)
@@ -68,6 +69,7 @@ func (db *TestDB) CreateTestUserWithDetails(email string, passwordHash, encrypti
 	`
 
 	var user repository.User
+
 	err := db.pool.QueryRow(ctx, query, email, passwordHash, encryptionKeyVerifier, salt).Scan(
 		&user.ID,
 		&user.Email,
@@ -86,6 +88,7 @@ func (db *TestDB) CreateRandomTestUser() *repository.User {
 	db.t.Helper()
 
 	email := fmt.Sprintf("test-%s@example.com", uuid.New().String())
+
 	return db.CreateTestUser(email, "test_hash")
 }
 
@@ -120,6 +123,7 @@ func (db *TestDB) CreateTestSecretFull(secret *repository.Secret) *repository.Se
 	`
 
 	var created repository.Secret
+
 	err := db.pool.QueryRow(ctx, query,
 		secret.UserID,
 		secret.Name,
@@ -194,6 +198,7 @@ func (db *TestDB) GetSecretByID(secretID uuid.UUID) *repository.Secret {
 	`
 
 	var secret repository.Secret
+
 	err := db.pool.QueryRow(ctx, query, secretID).Scan(
 		&secret.ID,
 		&secret.UserID,
@@ -225,6 +230,7 @@ func (db *TestDB) GetUserByID(userID uuid.UUID) *repository.User {
 	`
 
 	var user repository.User
+
 	err := db.pool.QueryRow(ctx, query, userID).Scan(
 		&user.ID,
 		&user.Email,
@@ -252,6 +258,7 @@ func (db *TestDB) GetUserByEmail(email string) *repository.User {
 	`
 
 	var user repository.User
+
 	err := db.pool.QueryRow(ctx, query, email).Scan(
 		&user.ID,
 		&user.Email,
@@ -281,11 +288,14 @@ func (db *TestDB) ListSecretsByUser(userID uuid.UUID) []*repository.Secret {
 
 	rows, err := db.pool.Query(ctx, query, userID)
 	require.NoError(db.t, err, "failed to list secrets by user")
+
 	defer rows.Close()
 
 	var secrets []*repository.Secret
+
 	for rows.Next() {
 		var secret repository.Secret
+
 		err := rows.Scan(
 			&secret.ID,
 			&secret.UserID,
@@ -300,10 +310,12 @@ func (db *TestDB) ListSecretsByUser(userID uuid.UUID) []*repository.Secret {
 			&secret.UpdatedAt,
 		)
 		require.NoError(db.t, err, "failed to scan secret")
+
 		secrets = append(secrets, &secret)
 	}
 
 	require.NoError(db.t, rows.Err(), "error iterating secrets")
+
 	return secrets
 }
 
@@ -322,11 +334,14 @@ func (db *TestDB) ListModifiedSince(userID uuid.UUID, since time.Time) []*reposi
 
 	rows, err := db.pool.Query(ctx, query, userID, since)
 	require.NoError(db.t, err, "failed to list modified secrets")
+
 	defer rows.Close()
 
 	var secrets []*repository.Secret
+
 	for rows.Next() {
 		var secret repository.Secret
+
 		err := rows.Scan(
 			&secret.ID,
 			&secret.UserID,
@@ -341,10 +356,12 @@ func (db *TestDB) ListModifiedSince(userID uuid.UUID, since time.Time) []*reposi
 			&secret.UpdatedAt,
 		)
 		require.NoError(db.t, err, "failed to scan secret")
+
 		secrets = append(secrets, &secret)
 	}
 
 	require.NoError(db.t, rows.Err(), "error iterating secrets")
+
 	return secrets
 }
 
@@ -363,6 +380,7 @@ func (db *TestDB) UpdateSecret(secret *repository.Secret) *repository.Secret {
 	`
 
 	var updated repository.Secret
+
 	err := db.pool.QueryRow(ctx, query,
 		secret.Name,
 		secret.Type,
@@ -427,6 +445,7 @@ func (db *TestDB) AssertSecretNotFound(secretID uuid.UUID) {
 	`
 
 	var id uuid.UUID
+
 	err := db.pool.QueryRow(ctx, query, secretID).Scan(&id)
 	require.Error(db.t, err, "expected secret not found error")
 }
@@ -459,6 +478,7 @@ func (db *TestDB) CountSecrets(userID uuid.UUID) int {
 	db.t.Helper()
 
 	secrets := db.ListSecretsByUser(userID)
+
 	return len(secrets)
 }
 
@@ -477,6 +497,7 @@ func (db *TestDB) CreateRefreshToken(userID uuid.UUID, deviceID string) *reposit
 	`
 
 	var token repository.RefreshToken
+
 	deviceIDPtr := &deviceID
 	err := db.pool.QueryRow(ctx, query, userID, tokenHash, deviceIDPtr, expiresAt).Scan(
 		&token.ID,

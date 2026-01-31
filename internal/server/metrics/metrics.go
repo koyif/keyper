@@ -37,6 +37,7 @@ func NewMetrics() *Metrics {
 func (m *Metrics) IncRequestCount(method string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.requestCount[method]++
 }
 
@@ -44,6 +45,7 @@ func (m *Metrics) IncRequestCount(method string) {
 func (m *Metrics) RecordRequestDuration(method string, duration time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.requestDurations[method] = append(m.requestDurations[method], duration)
 
 	// Keep only last 1000 entries per method
@@ -56,6 +58,7 @@ func (m *Metrics) RecordRequestDuration(method string, duration time.Duration) {
 func (m *Metrics) IncRequestErrors(method string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.requestErrors[method]++
 }
 
@@ -63,6 +66,7 @@ func (m *Metrics) IncRequestErrors(method string) {
 func (m *Metrics) IncActiveConnections() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.activeConnections++
 }
 
@@ -70,6 +74,7 @@ func (m *Metrics) IncActiveConnections() {
 func (m *Metrics) DecActiveConnections() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.activeConnections--
 }
 
@@ -77,6 +82,7 @@ func (m *Metrics) DecActiveConnections() {
 func (m *Metrics) IncDBQueryCount() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.dbQueryCount++
 }
 
@@ -84,6 +90,7 @@ func (m *Metrics) IncDBQueryCount() {
 func (m *Metrics) IncDBSlowQueries() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.dbSlowQueries++
 }
 
@@ -91,6 +98,7 @@ func (m *Metrics) IncDBSlowQueries() {
 func (m *Metrics) IncDBErrorCount() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	m.dbErrorCount++
 }
 
@@ -98,6 +106,7 @@ func (m *Metrics) IncDBErrorCount() {
 func (m *Metrics) GetRequestCount(method string) int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.requestCount[method]
 }
 
@@ -105,6 +114,7 @@ func (m *Metrics) GetRequestCount(method string) int64 {
 func (m *Metrics) GetRequestErrors(method string) int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.requestErrors[method]
 }
 
@@ -112,6 +122,7 @@ func (m *Metrics) GetRequestErrors(method string) int64 {
 func (m *Metrics) GetActiveConnections() int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.activeConnections
 }
 
@@ -119,6 +130,7 @@ func (m *Metrics) GetActiveConnections() int64 {
 func (m *Metrics) GetDBMetrics() (queryCount, slowQueries, errorCount int64) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+
 	return m.dbQueryCount, m.dbSlowQueries, m.dbErrorCount
 }
 
@@ -169,6 +181,7 @@ func (m *Metrics) Snapshot() map[string]any {
 	for method, count := range m.requestCount {
 		requestCounts[method] = count
 	}
+
 	snapshot["request_counts"] = requestCounts
 
 	// Request errors
@@ -176,6 +189,7 @@ func (m *Metrics) Snapshot() map[string]any {
 	for method, count := range m.requestErrors {
 		requestErrors[method] = count
 	}
+
 	snapshot["request_errors"] = requestErrors
 
 	return snapshot

@@ -36,6 +36,7 @@ func DefaultConfig() *Config {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		logrus.Warnf("Could not get home directory, using current dir: %v", err)
+
 		homeDir = "."
 	}
 
@@ -60,17 +61,21 @@ func Load(configPath string) (*Config, error) {
 		if _, err := os.Stat(configPath); err == nil {
 			v.SetConfigFile(configPath)
 		}
+
 		cfg.ConfigPath = configPath
 	} else {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			logrus.Warnf("Could not get home directory, using current dir: %v", err)
+
 			homeDir = "."
 		}
+
 		keyperDir := filepath.Join(homeDir, ".keyper")
 		v.AddConfigPath(keyperDir)
 		v.SetConfigName("config")
 		v.SetConfigType("yaml")
+
 		cfg.ConfigPath = filepath.Join(keyperDir, "config.yaml")
 	}
 
@@ -88,6 +93,7 @@ func Load(configPath string) (*Config, error) {
 		if !errors.As(err, &cfgNotFoundErr) {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
+
 		logrus.Debug("No config file found, using defaults")
 	} else {
 		logrus.Debugf("Using config file: %s", v.ConfigFileUsed())
@@ -111,6 +117,7 @@ func (c *Config) EnsureDirectories() error {
 		if dir == "" || dir == "." {
 			continue
 		}
+
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}

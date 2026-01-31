@@ -45,6 +45,7 @@ func NewVersionCommand(getCfg func() *config.Config, version, commit, buildDate 
 				fmt.Fprintf(cmd.OutOrStdout(), "Build Date: %s\n", buildDate)
 				fmt.Fprintf(cmd.OutOrStdout(), "Go Version: %s\n", runtime.Version())
 				fmt.Fprintf(cmd.OutOrStdout(), "OS/Arch:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
+
 				return nil
 			}
 
@@ -60,6 +61,7 @@ func NewVersionCommand(getCfg func() *config.Config, version, commit, buildDate 
 			}
 
 			fmt.Fprint(cmd.OutOrStdout(), formattedOutput)
+
 			return nil
 		},
 	}

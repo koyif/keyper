@@ -51,18 +51,20 @@ func Pull(ctx context.Context, cfg *config.Config, sess *session.Session) (*Pull
 
 	// Parse last sync timestamp from config
 	var lastSyncTime *timestamppb.Timestamp
+
 	if cfg.LastSyncAt != "" {
 		t, err := time.Parse(time.RFC3339, cfg.LastSyncAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse last_sync_at timestamp: %w", err)
 		}
+
 		lastSyncTime = timestamppb.New(t)
 	}
 
 	// Connect to server with authentication
 	conn, ctx, err := grpcutil.NewAuthenticatedConnection(ctx, cfg.Server, sess.GetAccessToken(), deviceID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to establish authenticated connection: %w", err)
 	}
 	defer conn.Close()
 
@@ -153,11 +155,13 @@ func decryptSecrets(secrets []*pb.Secret, encryptionKey []byte) ([]*storage.Loca
 
 		// Parse metadata as JSON if present
 		var metadataJSON string
+
 		if secret.Metadata != nil {
 			metadataBytes, err := json.Marshal(secret.Metadata)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal metadata for secret %s: %w", secret.Id, err)
 			}
+
 			metadataJSON = string(metadataBytes)
 		}
 
@@ -200,9 +204,11 @@ func determineConflictType(existing *storage.LocalSecret, server *storage.LocalS
 	if existing.IsDeleted && !server.IsDeleted {
 		return pb.ConflictType_CONFLICT_TYPE_DELETED_MODIFIED
 	}
+
 	if !existing.IsDeleted && server.IsDeleted {
 		return pb.ConflictType_CONFLICT_TYPE_MODIFIED_DELETED
 	}
+
 	return pb.ConflictType_CONFLICT_TYPE_MODIFIED_MODIFIED
 }
 
@@ -279,6 +285,7 @@ func mergeToLocalDB(ctx context.Context, cfg *config.Config, repo storage.Reposi
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+
 	defer func() {
 		// nolint:errcheck // Rollback error is expected to fail after Commit
 		_ = tx.Rollback()
@@ -307,6 +314,7 @@ func mergeToLocalDB(ctx context.Context, cfg *config.Config, repo storage.Reposi
 			if err := sqliteRepo.CreateInTx(ctx, tx, secret); err != nil {
 				return fmt.Errorf("failed to insert secret %s: %w", secret.ID, err)
 			}
+
 			continue
 		}
 
@@ -318,6 +326,7 @@ func mergeToLocalDB(ctx context.Context, cfg *config.Config, repo storage.Reposi
 					return fmt.Errorf("failed to update secret %s: %w", secret.ID, err)
 				}
 			}
+
 			continue
 		}
 

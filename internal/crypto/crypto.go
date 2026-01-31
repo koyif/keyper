@@ -41,6 +41,7 @@ func GenerateSalt(length int) ([]byte, error) {
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		return nil, fmt.Errorf("failed to generate salt: %w", err)
 	}
+
 	return salt, nil
 }
 
@@ -98,6 +99,7 @@ func GenerateEncryptionKeyVerifier(encryptionKey []byte) (verifier string, salt 
 	}
 
 	verifier = base64.StdEncoding.EncodeToString(ciphertext)
+
 	return verifier, salt, nil
 }
 
@@ -173,6 +175,7 @@ func encryptAESGCM(plaintext []byte, key []byte, nonce []byte) ([]byte, error) {
 	}
 
 	ciphertext := gcm.Seal(nonce, nonce, plaintext, nil)
+
 	return ciphertext, nil
 }
 

@@ -51,9 +51,11 @@ func StartGatewayServer(ctx context.Context, cfg GatewayConfig) error {
 	if err := pb.RegisterAuthServiceHandler(ctx, gwmux, conn); err != nil {
 		return fmt.Errorf("failed to register auth service: %w", err)
 	}
+
 	if err := pb.RegisterSecretsServiceHandler(ctx, gwmux, conn); err != nil {
 		return fmt.Errorf("failed to register secrets service: %w", err)
 	}
+
 	if err := pb.RegisterSyncServiceHandler(ctx, gwmux, conn); err != nil {
 		return fmt.Errorf("failed to register sync service: %w", err)
 	}
@@ -71,6 +73,7 @@ func StartGatewayServer(ctx context.Context, cfg GatewayConfig) error {
 	if err != nil {
 		return fmt.Errorf("failed to create Swagger UI handler: %w", err)
 	}
+
 	mux.Handle("/swagger/", http.StripPrefix("/swagger/", swaggerUIHandler))
 
 	// Health check endpoints
@@ -115,11 +118,13 @@ func serveSwaggerSpec() http.HandlerFunc {
 		if err != nil {
 			http.Error(w, "OpenAPI spec not found", http.StatusNotFound)
 			zap.L().Error("Error reading OpenAPI spec", zap.Error(err))
+
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+
 		if _, err := w.Write(spec); err != nil {
 			zap.L().Error("Error writing OpenAPI spec response", zap.Error(err))
 		}
@@ -186,6 +191,7 @@ func healthHandler(healthService *health.Service) http.HandlerFunc {
 		}
 
 		w.WriteHeader(statusCode)
+
 		if err := json.NewEncoder(w).Encode(report); err != nil {
 			zap.L().Error("Error encoding health report", zap.Error(err))
 		}
@@ -197,6 +203,7 @@ func livenessHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+
 		if _, err := w.Write([]byte(`{"status":"alive"}`)); err != nil {
 			zap.L().Error("Error writing liveness response", zap.Error(err))
 		}

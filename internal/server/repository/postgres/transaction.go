@@ -36,6 +36,7 @@ func (t *Transactor) WithTransaction(ctx context.Context, fn func(ctx context.Co
 	defer func() {
 		if p := recover(); p != nil {
 			_ = tx.Rollback(ctx) //nolint:errcheck
+
 			panic(p)
 		}
 	}()
@@ -46,6 +47,7 @@ func (t *Transactor) WithTransaction(ctx context.Context, fn func(ctx context.Co
 		if rbErr := tx.Rollback(ctx); rbErr != nil {
 			return fmt.Errorf("transaction error (rollback also failed: %w): %w", rbErr, err)
 		}
+
 		return err
 	}
 
@@ -60,6 +62,7 @@ func getTx(ctx context.Context) pgx.Tx {
 	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
 		return tx
 	}
+
 	return nil
 }
 
@@ -67,6 +70,7 @@ func getQuerier(ctx context.Context, pool *pgxpool.Pool) querier {
 	if tx := getTx(ctx); tx != nil {
 		return tx
 	}
+
 	return pool
 }
 

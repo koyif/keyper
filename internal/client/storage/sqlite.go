@@ -20,6 +20,7 @@ func scanSecret(scanner interface {
 	Scan(dest ...any) error
 }) (*LocalSecret, error) {
 	secret := &LocalSecret{}
+
 	err := scanner.Scan(
 		&secret.ID, &secret.Name, &secret.Type, &secret.EncryptedData, &secret.Nonce,
 		&secret.Metadata, &secret.Version, &secret.IsDeleted, &secret.SyncStatus,
@@ -38,15 +39,19 @@ func initializeSecretDefaults(secret *LocalSecret) {
 	if secret.CreatedAt.IsZero() {
 		secret.CreatedAt = now
 	}
+
 	if secret.UpdatedAt.IsZero() {
 		secret.UpdatedAt = now
 	}
+
 	if secret.LocalUpdatedAt.IsZero() {
 		secret.LocalUpdatedAt = now
 	}
+
 	if secret.Version == 0 {
 		secret.Version = 1
 	}
+
 	if secret.SyncStatus == "" {
 		secret.SyncStatus = SyncStatusPending
 	}
@@ -59,9 +64,11 @@ func checkRowsAffected(result sql.Result, id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
+
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrSecretNotFound, id)
 	}
+
 	return nil
 }
 
@@ -96,6 +103,7 @@ func NewSQLiteRepository(dbPath string) (*SQLiteRepository, error) {
 
 func (r *SQLiteRepository) migrate() error {
 	ctx := context.Background()
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -109,6 +117,7 @@ func (r *SQLiteRepository) migrate() error {
 
 	// Get current schema version
 	var currentVersion int
+
 	err = tx.QueryRowContext(ctx, getCurrentVersionSQL).Scan(&currentVersion)
 	if err != nil {
 		return fmt.Errorf("failed to get current schema version: %w", err)
@@ -228,6 +237,7 @@ func (r *SQLiteRepository) Get(ctx context.Context, id string) (*LocalSecret, er
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrSecretNotFound, id)
 	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get secret: %w", err)
 	}
@@ -250,6 +260,7 @@ func (r *SQLiteRepository) GetByName(ctx context.Context, name string) (*LocalSe
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrSecretNotFound, name)
 	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get secret by name: %w", err)
 	}
@@ -318,11 +329,13 @@ func (r *SQLiteRepository) List(ctx context.Context, filters ListFilters) ([]*Lo
 
 	if filters.Type != nil {
 		query += " AND type = ?"
+
 		args = append(args, *filters.Type)
 	}
 
 	if filters.SyncStatus != nil {
 		query += " AND sync_status = ?"
+
 		args = append(args, *filters.SyncStatus)
 	}
 
@@ -334,11 +347,13 @@ func (r *SQLiteRepository) List(ctx context.Context, filters ListFilters) ([]*Lo
 
 	if filters.Limit > 0 {
 		query += " LIMIT ?"
+
 		args = append(args, filters.Limit)
 	}
 
 	if filters.Offset > 0 {
 		query += " OFFSET ?"
+
 		args = append(args, filters.Offset)
 	}
 
@@ -349,11 +364,13 @@ func (r *SQLiteRepository) List(ctx context.Context, filters ListFilters) ([]*Lo
 	defer rows.Close()
 
 	var secrets []*LocalSecret
+
 	for rows.Next() {
 		secret, err := scanSecret(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
 		}
+
 		secrets = append(secrets, secret)
 	}
 
@@ -366,6 +383,7 @@ func (r *SQLiteRepository) List(ctx context.Context, filters ListFilters) ([]*Lo
 
 func (r *SQLiteRepository) GetPendingSync(ctx context.Context) ([]*LocalSecret, error) {
 	syncStatus := SyncStatusPending
+
 	return r.List(ctx, ListFilters{
 		SyncStatus:     &syncStatus,
 		IncludeDeleted: true, // Include deleted items for sync
@@ -442,6 +460,7 @@ func (r *SQLiteRepository) GetInTx(ctx context.Context, tx *sql.Tx, id string) (
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrSecretNotFound
 	}
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get secret in transaction: %w", err)
 	}
@@ -488,6 +507,7 @@ func (r *SQLiteRepository) CreateConflict(ctx context.Context, conflict *Conflic
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+
 	defer func() {
 		// nolint:errcheck // Rollback error is expected to fail after Commit
 		_ = tx.Rollback()
@@ -521,8 +541,10 @@ func (r *SQLiteRepository) GetUnresolvedConflicts(ctx context.Context) ([]*Confl
 	defer rows.Close()
 
 	var conflicts []*Conflict
+
 	for rows.Next() {
 		conflict := &Conflict{}
+
 		err := rows.Scan(
 			&conflict.ID, &conflict.SecretID, &conflict.ConflictType,
 			&conflict.LocalVersion, &conflict.ServerVersion,
@@ -534,6 +556,7 @@ func (r *SQLiteRepository) GetUnresolvedConflicts(ctx context.Context) ([]*Confl
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan conflict: %w", err)
 		}
+
 		conflicts = append(conflicts, conflict)
 	}
 
@@ -560,6 +583,7 @@ func (r *SQLiteRepository) ResolveConflict(ctx context.Context, id int64, strate
 	if err != nil {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
+
 	if rows == 0 {
 		return fmt.Errorf("%w: %d", ErrConflictNotFound, id)
 	}
@@ -595,5 +619,6 @@ func (r *SQLiteRepository) CreateConflictInTx(ctx context.Context, tx *sql.Tx, c
 	}
 
 	conflict.ID = id
+
 	return nil
 }

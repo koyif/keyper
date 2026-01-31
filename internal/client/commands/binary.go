@@ -70,49 +70,13 @@ func newBinaryAddCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 
 			// Use flags if provided, otherwise prompt interactively
 			if fileFlag != "" {
-				name = nameFlag
-				filePath = fileFlag
-				notes = notesFlag
+				name, filePath, notes = nameFlag, fileFlag, notesFlag
 			} else {
-				// Interactive prompts
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewInput().
-							Title("Name").
-							Description("A friendly name for this file").
-							Value(&name).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("name is required")
-								}
-								return nil
-							}),
+				var err error
 
-						huh.NewInput().
-							Title("File Path").
-							Description("Path to the file to upload").
-							Value(&filePath).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("file path is required")
-								}
-								// Clean and validate the path
-								cleaned := filepath.Clean(s)
-								if _, err := os.Stat(cleaned); err != nil {
-									return fmt.Errorf("file not found: %s", cleaned)
-								}
-								return nil
-							}),
-
-						huh.NewInput().
-							Title("Notes (optional)").
-							Description("Additional notes about this file").
-							Value(&notes),
-					),
-				)
-
-				if err := form.Run(); err != nil {
-					return fmt.Errorf("operation cancelled: %w", err)
+				name, filePath, notes, err = promptForBinaryInput()
+				if err != nil {
+					return err
 				}
 			}
 
@@ -139,6 +103,7 @@ func newBinaryAddCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 				fmt.Printf("⚠ Warning: File size is %.2f MB (larger than recommended 10 MB)\n", float64(fileSize)/(1024*1024))
 
 				var proceed bool
+
 				confirmForm := huh.NewForm(
 					huh.NewGroup(
 						huh.NewConfirm().
@@ -154,9 +119,11 @@ func newBinaryAddCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 
 			// Read file data with progress for large files
 			var fileData []byte
+
 			if fileSize > ChunkSize {
 				fmt.Printf("Reading file (%.2f MB)...\n", float64(fileSize)/(1024*1024))
 				fileData = make([]byte, fileSize)
+
 				var totalRead int64
 				for {
 					n, err := file.Read(fileData[totalRead:])
@@ -165,14 +132,17 @@ func newBinaryAddCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 					if err == io.EOF {
 						break
 					}
+
 					if err != nil {
 						return fmt.Errorf("failed to read file: %w", err)
 					}
 
 					// Show progress
 					progress := float64(totalRead) / float64(fileSize) * 100
+
 					fmt.Printf("\rProgress: %.1f%%", progress)
 				}
+
 				fmt.Println()
 			} else {
 				fileData, err = io.ReadAll(file)
@@ -203,6 +173,7 @@ func newBinaryAddCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 
 			// Encrypt the binary data
 			fmt.Println("Encrypting file...")
+
 			encryptionKey := sess.GetEncryptionKey()
 			if encryptionKey == nil {
 				return fmt.Errorf("encryption key not found in session")
@@ -222,6 +193,7 @@ func newBinaryAddCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 					"file_size":         fmt.Sprintf("%d", fileSize),
 				},
 			}
+
 			metadataJSON, err := protojson.Marshal(metadata)
 			if err != nil {
 				return fmt.Errorf("failed to marshal metadata: %w", err)
@@ -251,6 +223,7 @@ func newBinaryAddCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to store binary secret: %w", err)
 				}
 
@@ -295,6 +268,7 @@ func newBinaryGetCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
 				// Try to get by ID first, then by name
 				var secret *storage.LocalSecret
+
 				secret, err := repo.Get(ctx, identifier)
 				if err != nil {
 					// Try by name
@@ -316,6 +290,7 @@ func newBinaryGetCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 
 				// Decrypt the data
 				fmt.Println("Decrypting file...")
+
 				encryptionKey := sess.GetEncryptionKey()
 				if encryptionKey == nil {
 					return fmt.Errorf("encryption key not found in session")
@@ -343,6 +318,7 @@ func newBinaryGetCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 					if err != nil {
 						return fmt.Errorf("failed to write to stdout: %w", err)
 					}
+
 					return nil
 				} else {
 					// Use original filename in current directory
@@ -352,6 +328,7 @@ func newBinaryGetCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 				// Check if file exists
 				if _, err := os.Stat(finalOutputPath); err == nil {
 					var overwrite bool
+
 					form := huh.NewForm(
 						huh.NewGroup(
 							huh.NewConfirm().
@@ -367,6 +344,7 @@ func newBinaryGetCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 
 				// Write file
 				fmt.Printf("Writing file to %s...\n", finalOutputPath)
+
 				if err := os.WriteFile(finalOutputPath, binaryData.Data, 0600); err != nil {
 					return fmt.Errorf("failed to write file: %w", err)
 				}
@@ -414,6 +392,7 @@ func newBinaryListCmd(_ func() *config.Config, getSess func() *session.Session, 
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to list binary secrets: %w", err)
 				}
 
@@ -435,6 +414,7 @@ func newBinaryListCmd(_ func() *config.Config, getSess func() *session.Session, 
 					} else if secret.SyncStatus == storage.SyncStatusConflict {
 						status = "⚠"
 					}
+
 					if secret.IsDeleted {
 						status = "🗑"
 					}
@@ -442,6 +422,7 @@ func newBinaryListCmd(_ func() *config.Config, getSess func() *session.Session, 
 					// Try to get file info from metadata
 					mimeType := ""
 					fileSize := ""
+
 					if secret.Metadata != "" {
 						var metadata pb.Metadata
 						if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
@@ -506,6 +487,7 @@ func newBinaryDeleteCmd(_ func() *config.Config, getSess func() *session.Session
 			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
 				// Get secret to confirm
 				var secret *storage.LocalSecret
+
 				secret, err := repo.Get(ctx, identifier)
 				if err != nil {
 					secret, err = repo.GetByName(ctx, identifier)
@@ -525,6 +507,7 @@ func newBinaryDeleteCmd(_ func() *config.Config, getSess func() *session.Session
 				// Confirm deletion
 				if !noConfirm {
 					var confirm bool
+
 					form := huh.NewForm(
 						huh.NewGroup(
 							huh.NewConfirm().
@@ -549,6 +532,7 @@ func newBinaryDeleteCmd(_ func() *config.Config, getSess func() *session.Session
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to delete binary secret: %w", err)
 				}
 
@@ -564,4 +548,51 @@ func newBinaryDeleteCmd(_ func() *config.Config, getSess func() *session.Session
 	cmd.Flags().BoolVarP(&noConfirm, "yes", "y", false, "Skip confirmation prompt")
 
 	return cmd
+}
+
+// promptForBinaryInput prompts the user for binary file input
+func promptForBinaryInput() (name, filePath, notes string, err error) {
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Name").
+				Description("A friendly name for this file").
+				Value(&name).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("name is required")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("File Path").
+				Description("Path to the file to upload").
+				Value(&filePath).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("file path is required")
+					}
+					// Clean and validate the path
+					cleaned := filepath.Clean(s)
+					if _, err := os.Stat(cleaned); err != nil {
+						return fmt.Errorf("file not found: %s", cleaned)
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Notes (optional)").
+				Description("Additional notes about this file").
+				Value(&notes),
+		),
+	)
+
+	if err = form.Run(); err != nil {
+		return "", "", "", fmt.Errorf("operation cancelled: %w", err)
+	}
+
+	return name, filePath, notes, nil
 }

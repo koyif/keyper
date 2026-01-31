@@ -28,6 +28,7 @@ func FormatSecret(secret *storage.LocalSecret, decryptedData []byte, format stri
 
 		// Parse metadata if present
 		var notes string
+
 		if secret.Metadata != "" {
 			var metadata pb.Metadata
 			if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
@@ -55,8 +56,11 @@ func FormatSecret(secret *storage.LocalSecret, decryptedData []byte, format stri
 		}
 
 		// Parse metadata if present
-		var notes string
-		var tags []string
+		var (
+			notes string
+			tags  []string
+		)
+
 		if secret.Metadata != "" {
 			var metadata pb.Metadata
 			if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
@@ -84,6 +88,7 @@ func FormatSecret(secret *storage.LocalSecret, decryptedData []byte, format stri
 
 		// Parse metadata if present
 		var notes string
+
 		if secret.Metadata != "" {
 			var metadata pb.Metadata
 			if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
@@ -117,6 +122,7 @@ func FormatSecret(secret *storage.LocalSecret, decryptedData []byte, format stri
 
 		// Parse metadata if present
 		var notes string
+
 		if secret.Metadata != "" {
 			var metadata pb.Metadata
 			if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
@@ -205,6 +211,7 @@ func ConvertSecretToMap(secret *storage.LocalSecret, decryptedData []byte) (map[
 		if err := protojson.Unmarshal(decryptedData, &credData); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal credential data: %w", err)
 		}
+
 		result["username"] = credData.Username
 		result["password"] = credData.Password
 		result["email"] = credData.Email
@@ -215,6 +222,7 @@ func ConvertSecretToMap(secret *storage.LocalSecret, decryptedData []byte) (map[
 		if err := protojson.Unmarshal(decryptedData, &textData); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal text data: %w", err)
 		}
+
 		result["content"] = textData.Content
 
 	case pb.SecretType_SECRET_TYPE_BANK_CARD:
@@ -222,6 +230,7 @@ func ConvertSecretToMap(secret *storage.LocalSecret, decryptedData []byte) (map[
 		if err := protojson.Unmarshal(decryptedData, &cardData); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal card data: %w", err)
 		}
+
 		result["cardholder_name"] = cardData.CardholderName
 		result["card_number"] = cardData.CardNumber
 		result["expiry_month"] = cardData.ExpiryMonth
@@ -235,23 +244,34 @@ func ConvertSecretToMap(secret *storage.LocalSecret, decryptedData []byte) (map[
 		if err := protojson.Unmarshal(decryptedData, &binaryData); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal binary data: %w", err)
 		}
+
 		result["filename"] = binaryData.Filename
 		result["mime_type"] = binaryData.MimeType
 		result["size"] = len(binaryData.Data)
 	}
 
 	// Add metadata if present
-	if secret.Metadata != "" {
-		var metadata pb.Metadata
-		if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
-			if metadata.Notes != "" {
-				result["notes"] = metadata.Notes
-			}
-			if len(metadata.Tags) > 0 {
-				result["metadata_tags"] = metadata.Tags
-			}
-		}
-	}
+	addMetadataToMap(secret.Metadata, result)
 
 	return result, nil
+}
+
+// addMetadataToMap adds metadata fields to the result map if present
+func addMetadataToMap(metadataJSON string, result map[string]interface{}) {
+	if metadataJSON == "" {
+		return
+	}
+
+	var metadata pb.Metadata
+	if err := protojson.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return
+	}
+
+	if metadata.Notes != "" {
+		result["notes"] = metadata.Notes
+	}
+
+	if len(metadata.Tags) > 0 {
+		result["metadata_tags"] = metadata.Tags
+	}
 }

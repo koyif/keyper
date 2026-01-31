@@ -28,6 +28,7 @@ func DefaultRetryConfig() RetryConfig {
 // It respects context cancellation and returns the last error if all retries fail.
 func Retry(ctx context.Context, cfg RetryConfig, fn func() error) error {
 	var lastErr error
+
 	wait := cfg.InitialWait
 
 	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {

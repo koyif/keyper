@@ -109,24 +109,30 @@ func (s *SecretEditScreen) Update(msg tea.Msg) (*SecretEditScreen, tea.Cmd) {
 				// Save button
 				return s, s.saveChangesCmd()
 			}
+
 			s.nextField()
 		}
 
 	case secretLoadedMsg:
 		s.loaded = true
 		s.nameInput.SetValue(s.secret.Name)
+
 		if data, ok := msg.data["username"].(string); ok {
 			s.usernameInput.SetValue(data)
 		}
+
 		if data, ok := msg.data["password"].(string); ok {
 			s.passwordInput.SetValue(data)
 		}
+
 		if data, ok := msg.data["url"].(string); ok {
 			s.urlInput.SetValue(data)
 		}
+
 		if data, ok := msg.data["notes"].(string); ok {
 			s.notesInput.SetValue(data)
 		}
+
 		return s, nil
 
 	case secretUpdatedMsg:
@@ -196,12 +202,14 @@ func (s *SecretEditScreen) View() string {
 	if s.focusIndex == 5 {
 		saveBtn = buttonStyle.Render("[ Save ]")
 	}
+
 	form = lipgloss.JoinVertical(lipgloss.Left, form, saveBtn)
 
 	// Error/success messages
 	if s.errorMsg != "" {
 		form = lipgloss.JoinVertical(lipgloss.Left, form, "", errorStyle.Render("✗ "+s.errorMsg))
 	}
+
 	if s.successMsg != "" {
 		form = lipgloss.JoinVertical(lipgloss.Left, form, "", successStyle.Render("✓ "+s.successMsg))
 	}

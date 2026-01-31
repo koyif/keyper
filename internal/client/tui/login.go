@@ -125,6 +125,7 @@ func (s *LoginScreen) Update(msg tea.Msg) (*LoginScreen, tea.Cmd) {
 	case loginErrorMsg:
 		s.loading = false
 		s.errorMsg = msg.Error()
+
 		return s, nil
 	}
 
@@ -267,6 +268,7 @@ func (s *LoginScreen) performLogin() tea.Cmd {
 		s.errorMsg = "Username is required"
 		return nil
 	}
+
 	if password == "" {
 		s.errorMsg = "Password is required"
 		return nil
@@ -292,6 +294,7 @@ func (s *LoginScreen) performLogin() tea.Cmd {
 			if err != nil {
 				return loginErrorMsg{err}
 			}
+
 			authHash := crypto.HashMasterPassword(password, authSalt)
 
 			// Connect to server
@@ -302,6 +305,7 @@ func (s *LoginScreen) performLogin() tea.Cmd {
 			defer conn.Close()
 
 			client := pb.NewAuthServiceClient(conn)
+
 			ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
 			defer cancel()
 

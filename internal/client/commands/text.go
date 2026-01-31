@@ -56,66 +56,22 @@ func newTextAddCmd(_ func() *config.Config, getSess func() *session.Session, get
 				return err
 			}
 
-			var name, content, notes string
-			var tags []string
+			var (
+				name, content, notes string
+				tags                 []string
+			)
 
 			// Use flags if provided, otherwise prompt interactively
+
 			if nameFlag != "" {
-				name = nameFlag
-				content = contentFlag
+				name, content, notes = nameFlag, contentFlag, notesFlag
 				tags = tagsFlag
-				notes = notesFlag
 			} else {
-				// Interactive prompts
-				var tagsInput string
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewInput().
-							Title("Name").
-							Description("A friendly name for this note (e.g., 'Meeting Notes')").
-							Value(&name).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("name is required")
-								}
-								return nil
-							}),
+				var err error
 
-						huh.NewText().
-							Title("Content").
-							Description("The text content of your note").
-							Value(&content).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("content is required")
-								}
-								return nil
-							}),
-
-						huh.NewInput().
-							Title("Tags (optional)").
-							Description("Comma-separated tags (e.g., 'work, important')").
-							Value(&tagsInput),
-
-						huh.NewInput().
-							Title("Notes (optional)").
-							Description("Additional notes or metadata").
-							Value(&notes),
-					),
-				)
-
-				if err := form.Run(); err != nil {
-					return fmt.Errorf("operation cancelled: %w", err)
-				}
-
-				// Parse tags
-				if tagsInput != "" {
-					for _, tag := range strings.Split(tagsInput, ",") {
-						tag = strings.TrimSpace(tag)
-						if tag != "" {
-							tags = append(tags, tag)
-						}
-					}
+				name, content, notes, tags, err = promptForTextInput()
+				if err != nil {
+					return err
 				}
 			}
 
@@ -146,6 +102,7 @@ func newTextAddCmd(_ func() *config.Config, getSess func() *session.Session, get
 				Notes: notes,
 				Tags:  tags,
 			}
+
 			metadataJSON, err := protojson.Marshal(metadata)
 			if err != nil {
 				return fmt.Errorf("failed to marshal metadata: %w", err)
@@ -175,13 +132,14 @@ func newTextAddCmd(_ func() *config.Config, getSess func() *session.Session, get
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to store text note: %w", err)
 				}
 
 				logrus.Debugf("Text note created: id=%s, name=%s", secret.ID, secret.Name)
-				fmt.Printf("✓ Text note '%s' added successfully\n", name)
-				fmt.Printf("  ID: %s\n", secret.ID)
-				fmt.Printf("  Status: pending sync\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ Text note '%s' added successfully\n", name)
+				fmt.Fprintf(cmd.OutOrStdout(), "  ID: %s\n", secret.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Status: pending sync\n")
 
 				return nil
 			})
@@ -236,28 +194,18 @@ func newTextGetCmd(_ func() *config.Config, getSess func() *session.Session, get
 				}
 
 				// Display text note
-				fmt.Printf("\nText Note: %s\n", secret.Name)
-				fmt.Printf("ID: %s\n", secret.ID)
-				fmt.Println(strings.Repeat("-", 80))
-				fmt.Println(textData.Content)
-				fmt.Println(strings.Repeat("-", 80))
+				fmt.Fprintf(cmd.OutOrStdout(), "\nText Note: %s\n", secret.Name)
+				fmt.Fprintf(cmd.OutOrStdout(), "ID: %s\n", secret.ID)
+				fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("-", 80))
+				fmt.Fprintln(cmd.OutOrStdout(), textData.Content)
+				fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("-", 80))
 
 				// Display metadata if present
-				if secret.Metadata != "" {
-					var metadata pb.Metadata
-					if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
-						if len(metadata.Tags) > 0 {
-							fmt.Printf("Tags: %s\n", strings.Join(metadata.Tags, ", "))
-						}
-						if metadata.Notes != "" {
-							fmt.Printf("Notes: %s\n", metadata.Notes)
-						}
-					}
-				}
+				displayTextMetadata(cmd.OutOrStdout(), secret.Metadata)
 
-				fmt.Printf("\nCreated: %s\n", secret.CreatedAt.Format(time.RFC3339))
-				fmt.Printf("Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
-				fmt.Printf("Sync Status: %s\n", secret.SyncStatus)
+				fmt.Fprintf(cmd.OutOrStdout(), "\nCreated: %s\n", secret.CreatedAt.Format(time.RFC3339))
+				fmt.Fprintf(cmd.OutOrStdout(), "Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
+				fmt.Fprintf(cmd.OutOrStdout(), "Sync Status: %s\n", secret.SyncStatus)
 
 				return nil
 			})
@@ -294,17 +242,18 @@ func newTextListCmd(_ func() *config.Config, getSess func() *session.Session, ge
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to list text notes: %w", err)
 				}
 
 				if len(secrets) == 0 {
-					fmt.Println("No text notes found")
+					fmt.Fprintln(cmd.OutOrStdout(), "No text notes found")
 					return nil
 				}
 
 				// Display text notes
-				fmt.Printf("\nText Notes (%d):\n", len(secrets))
-				fmt.Println(strings.Repeat("-", 80))
+				fmt.Fprintf(cmd.OutOrStdout(), "\nText Notes (%d):\n", len(secrets))
+				fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("-", 80))
 
 				for _, secret := range secrets {
 					status := "✓"
@@ -313,26 +262,19 @@ func newTextListCmd(_ func() *config.Config, getSess func() *session.Session, ge
 					} else if secret.SyncStatus == storage.SyncStatusConflict {
 						status = "⚠"
 					}
+
 					if secret.IsDeleted {
 						status = "🗑"
 					}
 
 					// Try to get tags from metadata for display
-					tags := ""
-					if secret.Metadata != "" {
-						var metadata pb.Metadata
-						if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
-							if len(metadata.Tags) > 0 {
-								tags = " [" + strings.Join(metadata.Tags, ", ") + "]"
-							}
-						}
-					}
+					tags := formatTextTags(secret.Metadata)
 
-					fmt.Printf("%s %-36s  %s%s\n", status, secret.ID[:8]+"...", secret.Name, tags)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s %-36s  %s%s\n", status, secret.ID[:8]+"...", secret.Name, tags)
 				}
 
-				fmt.Println(strings.Repeat("-", 80))
-				fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
+				fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("-", 80))
+				fmt.Fprintln(cmd.OutOrStdout(), "✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
 
 				return nil
 			})
@@ -390,7 +332,9 @@ func newTextUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 				if secret.Metadata != "" {
 					protojson.Unmarshal([]byte(secret.Metadata), &metadata)
 				}
+
 				newNotes := metadata.Notes
+
 				var tagsInput string
 				if len(metadata.Tags) > 0 {
 					tagsInput = strings.Join(metadata.Tags, ", ")
@@ -405,6 +349,7 @@ func newTextUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 								if len(s) == 0 {
 									return fmt.Errorf("name is required")
 								}
+
 								return nil
 							}),
 
@@ -415,6 +360,7 @@ func newTextUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 								if len(s) == 0 {
 									return fmt.Errorf("content is required")
 								}
+
 								return nil
 							}),
 
@@ -451,6 +397,7 @@ func newTextUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 				metadata.Notes = newNotes
 				// Parse tags
 				metadata.Tags = nil
+
 				if tagsInput != "" {
 					for _, tag := range strings.Split(tagsInput, ",") {
 						tag = strings.TrimSpace(tag)
@@ -479,12 +426,13 @@ func newTextUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to update text note: %w", err)
 				}
 
 				logrus.Debugf("Text note updated: id=%s, name=%s", secret.ID, secret.Name)
-				fmt.Printf("✓ Text note '%s' updated successfully\n", newName)
-				fmt.Printf("  Status: pending sync\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ Text note '%s' updated successfully\n", newName)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Status: pending sync\n")
 
 				return nil
 			})
@@ -526,7 +474,7 @@ func newTextDeleteCmd(_ func() *config.Config, getSess func() *session.Session, 
 				}
 
 				if !confirm {
-					fmt.Println("Deletion cancelled")
+					fmt.Fprintln(cmd.OutOrStdout(), "Deletion cancelled")
 					return nil
 				}
 
@@ -535,12 +483,13 @@ func newTextDeleteCmd(_ func() *config.Config, getSess func() *session.Session, 
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to delete text note: %w", err)
 				}
 
 				logrus.Debugf("Text note deleted: id=%s, name=%s", secret.ID, secret.Name)
-				fmt.Printf("✓ Text note '%s' deleted successfully\n", secret.Name)
-				fmt.Printf("  Status: pending sync\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ Text note '%s' deleted successfully\n", secret.Name)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Status: pending sync\n")
 
 				return nil
 			})
@@ -550,4 +499,103 @@ func newTextDeleteCmd(_ func() *config.Config, getSess func() *session.Session, 
 	cmd.Flags().BoolVarP(&noConfirm, "yes", "y", false, "Skip confirmation prompt")
 
 	return cmd
+}
+
+// displayTextMetadata displays metadata fields (tags and notes) if present
+func displayTextMetadata(w interface {
+	Write(p []byte) (n int, err error)
+}, metadataJSON string) {
+	if metadataJSON == "" {
+		return
+	}
+
+	var metadata pb.Metadata
+	if err := protojson.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return
+	}
+
+	if len(metadata.Tags) > 0 {
+		fmt.Fprintf(w, "Tags: %s\n", strings.Join(metadata.Tags, ", "))
+	}
+
+	if metadata.Notes != "" {
+		fmt.Fprintf(w, "Notes: %s\n", metadata.Notes)
+	}
+}
+
+// formatTextTags extracts and formats text tags for display
+func formatTextTags(metadata string) string {
+	if metadata == "" {
+		return ""
+	}
+
+	var md pb.Metadata
+	if err := protojson.Unmarshal([]byte(metadata), &md); err != nil {
+		return ""
+	}
+
+	if len(md.Tags) == 0 {
+		return ""
+	}
+
+	return " [" + strings.Join(md.Tags, ", ") + "]"
+}
+
+// promptForTextInput prompts user for text note details interactively
+func promptForTextInput() (name, content, notes string, tags []string, err error) {
+	var tagsInput string
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Name").
+				Description("A friendly name for this note (e.g., 'Meeting Notes')").
+				Value(&name).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("name is required")
+					}
+
+					return nil
+				}),
+
+			huh.NewText().
+				Title("Content").
+				Description("The text content of your note").
+				Value(&content).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("content is required")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Tags (optional)").
+				Description("Comma-separated tags (e.g., 'work, important')").
+				Value(&tagsInput),
+
+			huh.NewInput().
+				Title("Notes (optional)").
+				Description("Additional notes or metadata").
+				Value(&notes),
+		),
+	)
+
+	if err = form.Run(); err != nil {
+		return "", "", "", nil, fmt.Errorf("operation cancelled: %w", err)
+	}
+
+	// Parse tags
+	if tagsInput != "" {
+		for _, tag := range strings.Split(tagsInput, ",") {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				tags = append(tags, tag)
+			}
+		}
+	}
+
+	return name, content, notes, tags, nil
 }

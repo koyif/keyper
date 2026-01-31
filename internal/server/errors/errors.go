@@ -51,6 +51,7 @@ func (e *DomainError) Error() string {
 	if e.Err != nil {
 		return fmt.Sprintf("[%s] %s: %v", e.Code, e.Message, e.Err)
 	}
+
 	return fmt.Sprintf("[%s] %s", e.Code, e.Message)
 }
 
@@ -121,6 +122,7 @@ func Wrap(err error, message string) error {
 	if err == nil {
 		return nil
 	}
+
 	return fmt.Errorf("%s: %w", message, err)
 }
 

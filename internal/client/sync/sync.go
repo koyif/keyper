@@ -87,11 +87,13 @@ func Sync(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 
 	// Get initial status for reporting
 	reportProgress("Checking sync status...")
+
 	pendingSecrets, err := repo.GetPendingSync(ctx)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to get pending secrets: %w", err)
 		return result, result.Error
 	}
+
 	result.InitialPendingCount = len(pendingSecrets)
 
 	conflicts, err := repo.GetUnresolvedConflicts(ctx)
@@ -99,6 +101,7 @@ func Sync(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 		result.Error = fmt.Errorf("failed to get conflicts: %w", err)
 		return result, result.Error
 	}
+
 	result.ConflictCount = len(conflicts)
 
 	// Parse last sync time if available
@@ -114,12 +117,14 @@ func Sync(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 	// CRITICAL: Pull first to merge server changes before pushing
 	// This prevents data loss by ensuring we have the latest server state
 	reportProgress("Pulling changes from server...")
+
 	pullStart := time.Now()
 
 	// Handle force server wins option by temporarily setting manual conflict resolution
 	origManualConflict := cfg.ManualConflictResolution
 	if opts.ForceServerWins {
 		cfg.ManualConflictResolution = false // Use last-write-wins which will favor server
+
 		reportProgress("Force server wins enabled: conflicts will be resolved with server version")
 	}
 	// Use defer to ensure setting is restored even if PullAndSync panics or returns early
@@ -144,6 +149,7 @@ func Sync(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 
 	// Push local changes to server
 	reportProgress("Pushing local changes to server...")
+
 	pushStart := time.Now()
 
 	pushResult, pushErr := PushWithRetry(ctx, cfg, sess, repo)
@@ -187,6 +193,7 @@ func Sync(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 	if err := UpdateLastSyncAt(cfg, syncTimeStr); err != nil {
 		logrus.Warnf("Warning: failed to update last_sync_at: %v", err)
 	}
+
 	result.LastSyncTime = time.Now()
 
 	reportProgress(fmt.Sprintf("Sync complete (%.2fs total)", result.TotalDuration.Seconds()))
@@ -214,6 +221,7 @@ func GetSyncStatusInfo(ctx context.Context, cfg *config.Config, repo storage.Rep
 	if err != nil {
 		return nil, fmt.Errorf("failed to get device ID: %w", err)
 	}
+
 	status.DeviceID = deviceID
 
 	// Get pending changes count
@@ -221,6 +229,7 @@ func GetSyncStatusInfo(ctx context.Context, cfg *config.Config, repo storage.Rep
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending secrets: %w", err)
 	}
+
 	status.PendingChanges = len(pending)
 
 	// Get unresolved conflicts count
@@ -228,6 +237,7 @@ func GetSyncStatusInfo(ctx context.Context, cfg *config.Config, repo storage.Rep
 	if err != nil {
 		return nil, fmt.Errorf("failed to get conflicts: %w", err)
 	}
+
 	status.ConflictCount = len(conflicts)
 
 	// Parse last sync time
@@ -270,6 +280,7 @@ func InterruptedSyncRecovery(ctx context.Context, repo storage.Repository) error
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+
 	defer func() {
 		// nolint:errcheck // Rollback error is expected to fail after Commit
 		_ = tx.Rollback()
@@ -287,5 +298,6 @@ func InterruptedSyncRecovery(ctx context.Context, repo storage.Repository) error
 	}
 
 	logrus.Info("Interrupted sync recovery completed successfully")
+
 	return nil
 }

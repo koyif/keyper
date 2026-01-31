@@ -29,6 +29,7 @@ func scanSecret(scanner interface {
 },
 ) (*repository.Secret, error) {
 	var secret repository.Secret
+
 	err := scanner.Scan(
 		&secret.ID,
 		&secret.UserID,
@@ -50,10 +51,13 @@ func scanSecret(scanner interface {
 }
 
 func (r *SecretRepository) Create(ctx context.Context, secret *repository.Secret) (*repository.Secret, error) {
-	var query string
-	var args []any
+	var (
+		query string
+		args  []any
+	)
 
 	// If ID is provided (not zero value), use it. Otherwise let database generate it.
+
 	if secret.ID != uuid.Nil {
 		query = `
 			INSERT INTO secrets (id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted)
@@ -86,6 +90,7 @@ func (r *SecretRepository) Create(ctx context.Context, secret *repository.Secret
 	}
 
 	q := getQuerier(ctx, r.pool)
+
 	result, err := scanSecret(q.QueryRow(ctx, query, args...))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create secret: %w", err)
@@ -103,11 +108,13 @@ func (r *SecretRepository) Get(ctx context.Context, id uuid.UUID) (*repository.S
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	secret, err := scanSecret(q.QueryRow(ctx, query, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get secret: %w", err)
 	}
 
@@ -128,6 +135,7 @@ func (r *SecretRepository) Update(ctx context.Context, secret *repository.Secret
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	result, err := scanSecret(q.QueryRow(
 		ctx,
 		query,
@@ -143,6 +151,7 @@ func (r *SecretRepository) Update(ctx context.Context, secret *repository.Secret
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, classifyRowsAffectedError(ctx, q, nil, 0, secret.ID)
 		}
+
 		return nil, fmt.Errorf("failed to update secret: %w", err)
 	}
 
@@ -168,7 +177,9 @@ func (r *SecretRepository) CountByUser(ctx context.Context, userID uuid.UUID) (i
 	query := `SELECT COUNT(*) FROM secrets WHERE user_id = $1 AND is_deleted = false`
 
 	q := getQuerier(ctx, r.pool)
+
 	var count int32
+
 	err := q.QueryRow(ctx, query, userID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count secrets by user: %w", err)
@@ -183,6 +194,7 @@ func (r *SecretRepository) ListByUser(ctx context.Context, userID uuid.UUID, lim
 	if limit <= 0 {
 		limit = 100 // Safety default if caller doesn't specify
 	}
+
 	if offset < 0 {
 		offset = 0
 	}
@@ -196,6 +208,7 @@ func (r *SecretRepository) ListByUser(ctx context.Context, userID uuid.UUID, lim
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	rows, err := q.Query(ctx, query, userID, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list secrets by user: %w", err)
@@ -203,11 +216,13 @@ func (r *SecretRepository) ListByUser(ctx context.Context, userID uuid.UUID, lim
 	defer rows.Close()
 
 	var secrets []*repository.Secret
+
 	for rows.Next() {
 		secret, err := scanSecret(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
 		}
+
 		secrets = append(secrets, secret)
 	}
 
@@ -235,6 +250,7 @@ func (r *SecretRepository) ListModifiedSince(ctx context.Context, userID uuid.UU
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	rows, err := q.Query(ctx, query, userID, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list modified secrets: %w", err)
@@ -242,11 +258,13 @@ func (r *SecretRepository) ListModifiedSince(ctx context.Context, userID uuid.UU
 	defer rows.Close()
 
 	var secrets []*repository.Secret
+
 	for rows.Next() {
 		secret, err := scanSecret(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
 		}
+
 		secrets = append(secrets, secret)
 	}
 
@@ -278,12 +296,14 @@ func (r *SecretRepository) HardDeleteTombstones(ctx context.Context, olderThan t
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	result, err := q.Exec(ctx, query, olderThan, batchSize)
 	if err != nil {
 		return 0, fmt.Errorf("failed to hard delete tombstones: %w", err)
 	}
 
 	deletedCount := int(result.RowsAffected())
+
 	return deletedCount, nil
 }
 
@@ -305,9 +325,11 @@ func (r *SecretRepository) Search(ctx context.Context, params SearchParams) ([]*
 	if params.Limit <= 0 {
 		params.Limit = 100 // Safety default
 	}
+
 	if params.Limit > 1000 {
 		params.Limit = 1000 // Safety maximum
 	}
+
 	if params.Offset < 0 {
 		params.Offset = 0
 	}
@@ -333,6 +355,7 @@ func (r *SecretRepository) Search(ctx context.Context, params SearchParams) ([]*
 	// Add type filter
 	if params.Type != nil {
 		query += fmt.Sprintf(" AND type = $%d", argIndex)
+
 		args = append(args, *params.Type)
 		argIndex++
 	}
@@ -340,6 +363,7 @@ func (r *SecretRepository) Search(ctx context.Context, params SearchParams) ([]*
 	// Add category filter (exact match on JSONB field)
 	if params.Category != "" {
 		query += fmt.Sprintf(" AND metadata->>'category' = $%d", argIndex)
+
 		args = append(args, params.Category)
 		argIndex++
 	}
@@ -347,6 +371,7 @@ func (r *SecretRepository) Search(ctx context.Context, params SearchParams) ([]*
 	// Add favorite filter (exact match on JSONB boolean field)
 	if params.IsFavorite != nil {
 		query += fmt.Sprintf(" AND (metadata->>'is_favorite')::boolean = $%d", argIndex)
+
 		args = append(args, *params.IsFavorite)
 		argIndex++
 	}
@@ -359,7 +384,9 @@ func (r *SecretRepository) Search(ctx context.Context, params SearchParams) ([]*
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal tags: %w", err)
 		}
+
 		query += fmt.Sprintf(" AND metadata @> $%d", argIndex)
+
 		args = append(args, tagsJSON)
 		argIndex++
 	}
@@ -369,10 +396,12 @@ func (r *SecretRepository) Search(ctx context.Context, params SearchParams) ([]*
 
 	// Add pagination
 	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argIndex, argIndex+1)
+
 	args = append(args, params.Limit, params.Offset)
 
 	// Execute query
 	q := getQuerier(ctx, r.pool)
+
 	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search secrets: %w", err)
@@ -381,11 +410,13 @@ func (r *SecretRepository) Search(ctx context.Context, params SearchParams) ([]*
 
 	// Scan results
 	var secrets []*repository.Secret
+
 	for rows.Next() {
 		secret, err := scanSecret(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
 		}
+
 		secrets = append(secrets, secret)
 	}
 

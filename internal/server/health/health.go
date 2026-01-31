@@ -64,16 +64,19 @@ func NewService(version string) *Service {
 func (s *Service) RegisterChecker(name string, checker Checker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.checkers[name] = checker
 }
 
 // CheckHealth runs all health checks and returns a report.
 func (s *Service) CheckHealth(ctx context.Context) Report {
 	s.mu.RLock()
+
 	checkers := make(map[string]Checker, len(s.checkers))
 	for name, checker := range s.checkers {
 		checkers[name] = checker
 	}
+
 	s.mu.RUnlock()
 
 	checks := make(map[string]Check, len(checkers))

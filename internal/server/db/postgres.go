@@ -89,10 +89,12 @@ func NewPool(ctx context.Context, cfg *Config) (*Pool, error) {
 
 	// Attempt to create pool with retry logic
 	var pool *pgxpool.Pool
+
 	retryCfg := DefaultRetryConfig()
 
 	err = Retry(ctx, retryCfg, func() error {
 		var err error
+
 		pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
 		if err != nil {
 			return fmt.Errorf("failed to create pool: %w", err)
@@ -106,7 +108,6 @@ func NewPool(ctx context.Context, cfg *Config) (*Pool, error) {
 
 		return nil
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}

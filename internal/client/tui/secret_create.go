@@ -110,6 +110,7 @@ func (s *SecretCreateScreen) Update(msg tea.Msg) (*SecretCreateScreen, tea.Cmd) 
 				// Save button
 				return s, s.saveSecretCmd()
 			}
+
 			s.nextField()
 		}
 
@@ -171,12 +172,14 @@ func (s *SecretCreateScreen) View() string {
 	if s.focusIndex == 5 {
 		saveBtn = buttonStyle.Render("[ Save ]")
 	}
+
 	form = lipgloss.JoinVertical(lipgloss.Left, form, saveBtn)
 
 	// Error/success messages
 	if s.errorMsg != "" {
 		form = lipgloss.JoinVertical(lipgloss.Left, form, "", errorStyle.Render("✗ "+s.errorMsg))
 	}
+
 	if s.successMsg != "" {
 		form = lipgloss.JoinVertical(lipgloss.Left, form, "", successStyle.Render("✓ "+s.successMsg))
 	}

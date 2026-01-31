@@ -93,6 +93,7 @@ func extractToken(ctx context.Context) (string, error) {
 
 	// Expected format: "Bearer <token>"
 	authHeader := authHeaders[0]
+
 	parts := strings.SplitN(authHeader, " ", 2)
 	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
 		return "", status.Error(codes.Unauthenticated, "invalid authorization header format") //nolint:wrapcheck // gRPC status error is the correct format
@@ -117,6 +118,7 @@ func GetDeviceIDFromContext(ctx context.Context) string {
 	if !ok {
 		return ""
 	}
+
 	return deviceID
 }
 

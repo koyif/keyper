@@ -73,6 +73,7 @@ func (f *TextFormatter) Format(data interface{}) (string, error) {
 		if typeVal, ok := v["type"].(string); ok {
 			return f.formatMapByType(typeVal, v)
 		}
+
 		return fmt.Sprintf("%+v\n", v), nil
 	default:
 		return fmt.Sprintf("%+v\n", data), nil
@@ -89,6 +90,7 @@ func (f *TextFormatter) FormatList(data interface{}) (string, error) {
 		for i, item := range v {
 			items[i] = *item
 		}
+
 		return f.formatListItems(items)
 	default:
 		return fmt.Sprintf("%+v\n", data), nil
@@ -102,6 +104,7 @@ func (f *TextFormatter) formatTemplate(tmpl *template.Template, data interface{}
 		// Fallback to JSON on template error
 		return f.fallbackToJSON(data)
 	}
+
 	return buf.String(), nil
 }
 
@@ -133,6 +136,7 @@ func (f *TextFormatter) formatListItems(items []ListItem) (string, error) {
 	for _, item := range items {
 		icon := templateFuncs()["syncIcon"].(func(string) string)(item.SyncStatus)
 		typeColor := color.CyanString
+
 		switch item.Type {
 		case pb.SecretType_SECRET_TYPE_CREDENTIAL:
 			typeColor = color.BlueString
@@ -145,6 +149,7 @@ func (f *TextFormatter) formatListItems(items []ListItem) (string, error) {
 		}
 
 		typeStr := formatSecretType(item.Type)
+
 		deletedStr := ""
 		if item.IsDeleted {
 			deletedStr = color.RedString(" 🗑")

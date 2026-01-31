@@ -59,7 +59,7 @@ func decodeEncryptedData(encryptedDataB64 string, nonceSize int) (nonce, ciphert
 	}
 
 	if len(encryptedBytes) < nonceSize {
-		return nil, nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)")
+		return nil, nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)") //nolint:wrapcheck // gRPC status errors should not be wrapped
 	}
 
 	return encryptedBytes[:nonceSize], encryptedBytes[nonceSize:], nil
@@ -97,8 +97,10 @@ func (s *SyncService) Pull(ctx context.Context, req *pb.PullRequest) (*pb.PullRe
 		return nil, status.Errorf(codes.Internal, "failed to retrieve modified secrets: %v", err)
 	}
 
-	var secrets []*pb.Secret
-	var deletedSecretIDs []string
+	var (
+		secrets          []*pb.Secret
+		deletedSecretIDs []string
+	)
 
 	for _, secret := range modifiedSecrets {
 		if secret.IsDeleted {
@@ -109,8 +111,10 @@ func (s *SyncService) Pull(ctx context.Context, req *pb.PullRequest) (*pb.PullRe
 				zap.L().Error("Failed to convert secret",
 					zap.String("secret_id", secret.ID.String()),
 					zap.Error(err))
+
 				return nil, status.Errorf(codes.Internal, "failed to convert secret: %v", err)
 			}
+
 			secrets = append(secrets, pbSecret)
 		}
 	}
@@ -140,8 +144,10 @@ func (s *SyncService) Push(ctx context.Context, req *pb.PushRequest) (*pb.PushRe
 		zap.Int("secrets_count", len(req.Secrets)),
 		zap.Int("deletes_count", len(req.DeletedSecretIds)))
 
-	var acceptedIDs []string
-	var conflicts []*pb.Conflict
+	var (
+		acceptedIDs []string
+		conflicts   []*pb.Conflict
+	)
 
 	err = s.transactor.WithTransaction(ctx, func(txCtx context.Context) error {
 		return s.executeOperations(txCtx, userID, req, &acceptedIDs, &conflicts)
@@ -179,6 +185,7 @@ func (s *SyncService) executeOperations(
 		if err != nil {
 			return err
 		}
+
 		if result != nil {
 			if result.Accepted {
 				*acceptedIDs = append(*acceptedIDs, result.SecretID)
@@ -193,6 +200,7 @@ func (s *SyncService) executeOperations(
 		if err != nil {
 			return err
 		}
+
 		if result != nil {
 			if result.Accepted {
 				*acceptedIDs = append(*acceptedIDs, result.SecretID)
@@ -245,6 +253,7 @@ func (s *SyncService) processDelete(ctx context.Context, userID uuid.UUID, secre
 	}
 
 	operation := NewDeleteOperation(s.secretRepo, secretID, existingSecret)
+
 	result, err := operation.Execute(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute delete operation: %w", err) //nolint:wrapcheck // operation error wrapped

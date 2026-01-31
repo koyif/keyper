@@ -45,17 +45,17 @@ Use --force to resolve all conflicts by accepting the server version.`,
 			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
 				// Status-only mode
 				if statusOnly {
-					return printSyncStatus(ctx, cfg, repo)
+					return printSyncStatus(cmd, ctx, cfg, repo)
 				}
 
 				// Perform full sync
-				fmt.Println("Starting synchronization...")
-				fmt.Println()
+				fmt.Fprintln(cmd.OutOrStdout(), "Starting synchronization...")
+				fmt.Fprintln(cmd.OutOrStdout())
 
 				opts := &sync.SyncOptions{
 					ForceServerWins: forceServerWins,
 					ProgressCallback: func(msg string) {
-						fmt.Printf("  %s\n", msg)
+						fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", msg)
 					},
 				}
 
@@ -64,33 +64,35 @@ Use --force to resolve all conflicts by accepting the server version.`,
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("sync operation timed out after 30s")
 					}
+
 					return fmt.Errorf("sync failed: %w", err)
 				}
 
 				// Print sync results
-				fmt.Println()
-				fmt.Println("Sync Results:")
-				fmt.Println("─────────────────────────────────────")
-				fmt.Printf("  Total Duration:    %.2fs\n", result.TotalDuration.Seconds())
-				fmt.Printf("  Pull Duration:     %.2fs\n", result.PullDuration.Seconds())
-				fmt.Printf("  Push Duration:     %.2fs\n", result.PushDuration.Seconds())
-				fmt.Println()
-				fmt.Printf("  Pushed Secrets:    %d\n", result.PushedSecrets)
-				fmt.Printf("  Conflicts:         %d\n", result.ConflictCount)
-				fmt.Println()
-				fmt.Printf("  Initial Pending:   %d\n", result.InitialPendingCount)
-				fmt.Printf("  Final Pending:     %d\n", result.FinalPendingCount)
-				fmt.Println()
+				out := cmd.OutOrStdout()
+				fmt.Fprintln(out)
+				fmt.Fprintln(out, "Sync Results:")
+				fmt.Fprintln(out, "─────────────────────────────────────")
+				fmt.Fprintf(out, "  Total Duration:    %.2fs\n", result.TotalDuration.Seconds())
+				fmt.Fprintf(out, "  Pull Duration:     %.2fs\n", result.PullDuration.Seconds())
+				fmt.Fprintf(out, "  Push Duration:     %.2fs\n", result.PushDuration.Seconds())
+				fmt.Fprintln(out)
+				fmt.Fprintf(out, "  Pushed Secrets:    %d\n", result.PushedSecrets)
+				fmt.Fprintf(out, "  Conflicts:         %d\n", result.ConflictCount)
+				fmt.Fprintln(out)
+				fmt.Fprintf(out, "  Initial Pending:   %d\n", result.InitialPendingCount)
+				fmt.Fprintf(out, "  Final Pending:     %d\n", result.FinalPendingCount)
+				fmt.Fprintln(out)
 
 				if result.LastSyncTime.IsZero() {
-					fmt.Printf("  Last Sync:         never\n")
+					fmt.Fprintf(out, "  Last Sync:         never\n")
 				} else {
-					fmt.Printf("  Last Sync:         %s\n", result.LastSyncTime.Format("2006-01-02 15:04:05"))
+					fmt.Fprintf(out, "  Last Sync:         %s\n", result.LastSyncTime.Format("2006-01-02 15:04:05"))
 				}
 
 				if result.Success {
-					fmt.Println()
-					fmt.Println("✓ Sync completed successfully")
+					fmt.Fprintln(out)
+					fmt.Fprintln(out, "✓ Sync completed successfully")
 				}
 
 				return nil
@@ -106,37 +108,39 @@ Use --force to resolve all conflicts by accepting the server version.`,
 }
 
 // printSyncStatus displays the current sync status without performing a sync.
-func printSyncStatus(ctx context.Context, cfg *config.Config, repo storage.Repository) error {
+func printSyncStatus(cmd *cobra.Command, ctx context.Context, cfg *config.Config, repo storage.Repository) error {
 	status, err := sync.GetSyncStatusInfo(ctx, cfg, repo)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("sync status check timed out after 30s")
 		}
+
 		return fmt.Errorf("failed to get sync status: %w", err)
 	}
 
-	fmt.Println("Sync Status:")
-	fmt.Println("─────────────────────────────────────")
-	fmt.Printf("  Device ID:         %s\n", status.DeviceID)
-	fmt.Println()
-	fmt.Printf("  Pending Changes:   %d\n", status.PendingChanges)
-	fmt.Printf("  Conflicts:         %d\n", status.ConflictCount)
-	fmt.Println()
+	out := cmd.OutOrStdout()
+	fmt.Fprintln(out, "Sync Status:")
+	fmt.Fprintln(out, "─────────────────────────────────────")
+	fmt.Fprintf(out, "  Device ID:         %s\n", status.DeviceID)
+	fmt.Fprintln(out)
+	fmt.Fprintf(out, "  Pending Changes:   %d\n", status.PendingChanges)
+	fmt.Fprintf(out, "  Conflicts:         %d\n", status.ConflictCount)
+	fmt.Fprintln(out)
 
 	if status.LastSyncTime != nil {
 		timeSince := time.Since(*status.LastSyncTime)
-		fmt.Printf("  Last Sync:         %s\n", status.LastSyncTimeStr)
-		fmt.Printf("  Time Since Sync:   %s\n", formatDuration(timeSince))
+		fmt.Fprintf(out, "  Last Sync:         %s\n", status.LastSyncTimeStr)
+		fmt.Fprintf(out, "  Time Since Sync:   %s\n", formatDuration(timeSince))
 	} else {
-		fmt.Printf("  Last Sync:         never\n")
+		fmt.Fprintf(out, "  Last Sync:         never\n")
 	}
 
-	fmt.Println()
+	fmt.Fprintln(out)
 
 	if status.NeedsSyncReason != "" {
-		fmt.Printf("⚠ Sync needed: %s\n", status.NeedsSyncReason)
+		fmt.Fprintf(out, "⚠ Sync needed: %s\n", status.NeedsSyncReason)
 	} else {
-		fmt.Println("✓ All changes synced")
+		fmt.Fprintln(out, "✓ All changes synced")
 	}
 
 	return nil
@@ -147,11 +151,14 @@ func formatDuration(d time.Duration) string {
 	if d < time.Minute {
 		return fmt.Sprintf("%.0f seconds", d.Seconds())
 	}
+
 	if d < time.Hour {
 		return fmt.Sprintf("%.0f minutes", d.Minutes())
 	}
+
 	if d < 24*time.Hour {
 		return fmt.Sprintf("%.1f hours", d.Hours())
 	}
+
 	return fmt.Sprintf("%.1f days", d.Hours()/24)
 }

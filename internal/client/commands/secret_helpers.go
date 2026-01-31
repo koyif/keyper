@@ -14,16 +14,19 @@ import (
 // getSecret retrieves a secret by ID or name with type validation.
 func getSecret(ctx context.Context, repo storage.Repository, identifier string, expectedType pb.SecretType) (*storage.LocalSecret, error) {
 	var secret *storage.LocalSecret
+
 	secret, err := repo.Get(ctx, identifier)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("database operation timed out after 30s")
 		}
+
 		secret, err = repo.GetByName(ctx, identifier)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, fmt.Errorf("database operation timed out after 30s")
 			}
+
 			return nil, fmt.Errorf("secret not found: %s", identifier)
 		}
 	}
@@ -46,6 +49,7 @@ func confirmDeletion(secretName string, secretType string, noConfirm bool) (bool
 	}
 
 	var confirm bool
+
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewConfirm().

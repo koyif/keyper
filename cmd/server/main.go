@@ -74,6 +74,7 @@ func main() {
 	)
 
 	ctx := context.Background()
+
 	pool, err := db.NewPool(ctx, &cfg.Database)
 	if err != nil {
 		zapLogger.Fatal("Failed to initialize database", zap.Error(err))
@@ -89,10 +90,13 @@ func main() {
 	transactor := postgres.NewTransactor(pool.Pool)
 
 	jwtManager := auth.NewJWTManager(cfg.Auth.JWTSecret)
+
 	zapLogger.Info("JWT manager initialized")
 
 	tokenBlacklist := auth.NewTokenBlacklist(cfg.Limits.TokenCleanupInterval)
+
 	defer tokenBlacklist.Stop()
+
 	zapLogger.Info("Token blacklist initialized")
 
 	tombstoneConfig := jobs.Config{
@@ -104,14 +108,18 @@ func main() {
 	}
 	tombstoneCleanup := jobs.NewTombstoneCleanup(secretRepo, tombstoneConfig)
 	tombstoneCleanup.Start()
+
 	defer tombstoneCleanup.Stop()
+
 	zapLogger.Info("Tombstone cleanup job initialized")
 
 	metricsCollector := metrics.NewMetrics()
 
 	metricsCtx, metricsCancel := context.WithCancel(context.Background())
 	defer metricsCancel()
+
 	go metricsCollector.StartPeriodicLogging(metricsCtx, zapLogger, cfg.Limits.MetricsLogInterval)
+
 	zapLogger.Info("Metrics collector initialized")
 
 	healthService := health.NewService(version)
@@ -140,6 +148,7 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	lc := &net.ListenConfig{}
+
 	listener, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		zapLogger.Fatal("Failed to create listener",
@@ -181,6 +190,7 @@ func main() {
 	defer cancel()
 
 	done := make(chan struct{})
+
 	go func() {
 		grpcServer.GracefulStop()
 		close(done)
@@ -220,6 +230,7 @@ func loadConfig() Config {
 	}
 
 	serverPort := 50051
+
 	if port := os.Getenv("SERVER_PORT"); port != "" {
 		if p, err := strconv.Atoi(port); err == nil {
 			serverPort = p
@@ -227,6 +238,7 @@ func loadConfig() Config {
 	}
 
 	httpPort := 8080
+
 	if port := os.Getenv("HTTP_PORT"); port != "" {
 		if p, err := strconv.Atoi(port); err == nil {
 			httpPort = p
@@ -234,6 +246,7 @@ func loadConfig() Config {
 	}
 
 	postgresPort := 5432
+
 	if port := os.Getenv("POSTGRES_PORT"); port != "" {
 		if p, err := strconv.Atoi(port); err == nil {
 			postgresPort = p
@@ -241,6 +254,7 @@ func loadConfig() Config {
 	}
 
 	enableCORS := true
+
 	if cors := os.Getenv("ENABLE_CORS"); cors != "" {
 		if b, err := strconv.ParseBool(cors); err == nil {
 			enableCORS = b
@@ -251,6 +265,7 @@ func loadConfig() Config {
 		if value := os.Getenv(key); value != "" {
 			return value
 		}
+
 		return defaultValue
 	}
 

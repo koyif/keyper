@@ -230,6 +230,7 @@ func NewDeleteOperation(repo SecretDeleter, secretID uuid.UUID, existing *reposi
 func (op *DeleteOperation) Execute(ctx context.Context, userID uuid.UUID) (*OperationResult, error) {
 	if op.existingSecret == nil {
 		zap.L().Debug("Secret already deleted", zap.String("secret_id", op.secretID.String()))
+
 		return &OperationResult{
 			SecretID:  op.secretID.String(),
 			Accepted:  true,
@@ -242,6 +243,7 @@ func (op *DeleteOperation) Execute(ctx context.Context, userID uuid.UUID) (*Oper
 			zap.String("user_id", userID.String()),
 			zap.String("secret_id", op.secretID.String()),
 			zap.String("owner_id", op.existingSecret.UserID.String()))
+
 		return &OperationResult{
 			SecretID:  op.secretID.String(),
 			Accepted:  false,
@@ -266,6 +268,7 @@ func (op *DeleteOperation) Execute(ctx context.Context, userID uuid.UUID) (*Oper
 				Operation: "delete",
 			}, nil
 		}
+
 		return nil, fmt.Errorf("failed to delete secret: %w", err)
 	}
 

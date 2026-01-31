@@ -62,68 +62,14 @@ func newCredentialAddCmd(_ func() *config.Config, getSess func() *session.Sessio
 
 			// Use flags if provided, otherwise prompt interactively
 			if nameFlag != "" {
-				name = nameFlag
-				username = usernameFlag
-				password = passwordFlag
-				email = emailFlag
-				url = urlFlag
-				notes = notesFlag
+				name, username, password = nameFlag, usernameFlag, passwordFlag
+				email, url, notes = emailFlag, urlFlag, notesFlag
 			} else {
-				// Interactive prompts
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewInput().
-							Title("Name").
-							Description("A friendly name for this credential (e.g., 'GitHub Account')").
-							Value(&name).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("name is required")
-								}
-								return nil
-							}),
+				var err error
 
-						huh.NewInput().
-							Title("Username").
-							Description("Username or account identifier").
-							Value(&username).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("username is required")
-								}
-								return nil
-							}),
-
-						huh.NewInput().
-							Title("Password").
-							Description("Password for this account").
-							Value(&password).
-							EchoMode(huh.EchoModePassword).
-							Validate(func(s string) error {
-								if len(s) == 0 {
-									return fmt.Errorf("password is required")
-								}
-								return nil
-							}),
-
-						huh.NewInput().
-							Title("Email (optional)").
-							Value(&email),
-
-						huh.NewInput().
-							Title("URL (optional)").
-							Description("Website or service URL").
-							Value(&url),
-
-						huh.NewInput().
-							Title("Notes (optional)").
-							Description("Additional notes or comments").
-							Value(&notes),
-					),
-				)
-
-				if err := form.Run(); err != nil {
-					return fmt.Errorf("operation cancelled: %w", err)
+				name, username, password, email, url, notes, err = promptForCredentialInput()
+				if err != nil {
+					return err
 				}
 			}
 
@@ -157,6 +103,7 @@ func newCredentialAddCmd(_ func() *config.Config, getSess func() *session.Sessio
 				Notes: notes,
 				Url:   url,
 			}
+
 			metadataJSON, err := protojson.Marshal(metadata)
 			if err != nil {
 				return fmt.Errorf("failed to marshal metadata: %w", err)
@@ -186,13 +133,14 @@ func newCredentialAddCmd(_ func() *config.Config, getSess func() *session.Sessio
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to store credential: %w", err)
 				}
 
 				logrus.Debugf("Credential created: id=%s, name=%s", secret.ID, secret.Name)
-				fmt.Printf("✓ Credential '%s' added successfully\n", name)
-				fmt.Printf("  ID: %s\n", secret.ID)
-				fmt.Printf("  Status: pending sync\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ Credential '%s' added successfully\n", name)
+				fmt.Fprintf(cmd.OutOrStdout(), "  ID: %s\n", secret.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Status: pending sync\n")
 
 				return nil
 			})
@@ -249,15 +197,17 @@ func newCredentialGetCmd(_ func() *config.Config, getSess func() *session.Sessio
 				}
 
 				// Display credential
-				fmt.Printf("\nCredential: %s\n", secret.Name)
-				fmt.Printf("ID: %s\n", secret.ID)
-				fmt.Printf("Username: %s\n", credData.Username)
-				fmt.Printf("Password: %s\n", credData.Password)
+				fmt.Fprintf(cmd.OutOrStdout(), "\nCredential: %s\n", secret.Name)
+				fmt.Fprintf(cmd.OutOrStdout(), "ID: %s\n", secret.ID)
+				fmt.Fprintf(cmd.OutOrStdout(), "Username: %s\n", credData.Username)
+				fmt.Fprintf(cmd.OutOrStdout(), "Password: %s\n", credData.Password)
+
 				if credData.Email != "" {
-					fmt.Printf("Email: %s\n", credData.Email)
+					fmt.Fprintf(cmd.OutOrStdout(), "Email: %s\n", credData.Email)
 				}
+
 				if credData.Url != "" {
-					fmt.Printf("URL: %s\n", credData.Url)
+					fmt.Fprintf(cmd.OutOrStdout(), "URL: %s\n", credData.Url)
 				}
 
 				// Display metadata if present
@@ -265,14 +215,14 @@ func newCredentialGetCmd(_ func() *config.Config, getSess func() *session.Sessio
 					var metadata pb.Metadata
 					if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
 						if metadata.Notes != "" {
-							fmt.Printf("Notes: %s\n", metadata.Notes)
+							fmt.Fprintf(cmd.OutOrStdout(), "Notes: %s\n", metadata.Notes)
 						}
 					}
 				}
 
-				fmt.Printf("\nCreated: %s\n", secret.CreatedAt.Format(time.RFC3339))
-				fmt.Printf("Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
-				fmt.Printf("Sync Status: %s\n", secret.SyncStatus)
+				fmt.Fprintf(cmd.OutOrStdout(), "\nCreated: %s\n", secret.CreatedAt.Format(time.RFC3339))
+				fmt.Fprintf(cmd.OutOrStdout(), "Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
+				fmt.Fprintf(cmd.OutOrStdout(), "Sync Status: %s\n", secret.SyncStatus)
 
 				return nil
 			})
@@ -309,17 +259,18 @@ func newCredentialListCmd(_ func() *config.Config, getSess func() *session.Sessi
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to list credentials: %w", err)
 				}
 
 				if len(secrets) == 0 {
-					fmt.Println("No credentials found")
+					fmt.Fprintln(cmd.OutOrStdout(), "No credentials found")
 					return nil
 				}
 
 				// Display credentials
-				fmt.Printf("\nCredentials (%d):\n", len(secrets))
-				fmt.Println(strings.Repeat("-", 80))
+				fmt.Fprintf(cmd.OutOrStdout(), "\nCredentials (%d):\n", len(secrets))
+				fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("-", 80))
 
 				for _, secret := range secrets {
 					status := "✓"
@@ -328,12 +279,14 @@ func newCredentialListCmd(_ func() *config.Config, getSess func() *session.Sessi
 					} else if secret.SyncStatus == storage.SyncStatusConflict {
 						status = "⚠"
 					}
+
 					if secret.IsDeleted {
 						status = "🗑"
 					}
 
 					// Try to get URL from metadata for display
 					url := ""
+
 					if secret.Metadata != "" {
 						var metadata pb.Metadata
 						if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
@@ -341,15 +294,17 @@ func newCredentialListCmd(_ func() *config.Config, getSess func() *session.Sessi
 						}
 					}
 
-					fmt.Printf("%s %-36s  %s", status, secret.ID[:8]+"...", secret.Name)
+					fmt.Fprintf(cmd.OutOrStdout(), "%s %-36s  %s", status, secret.ID[:8]+"...", secret.Name)
+
 					if url != "" {
-						fmt.Printf("  (%s)", url)
+						fmt.Fprintf(cmd.OutOrStdout(), "  (%s)", url)
 					}
-					fmt.Println()
+
+					fmt.Fprintln(cmd.OutOrStdout())
 				}
 
-				fmt.Println(strings.Repeat("-", 80))
-				fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
+				fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("-", 80))
+				fmt.Fprintln(cmd.OutOrStdout(), "✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
 
 				return nil
 			})
@@ -410,6 +365,7 @@ func newCredentialUpdateCmd(getCfg func() *config.Config, getSess func() *sessio
 				if secret.Metadata != "" {
 					protojson.Unmarshal([]byte(secret.Metadata), &metadata)
 				}
+
 				newNotes := metadata.Notes
 
 				form := huh.NewForm(
@@ -421,6 +377,7 @@ func newCredentialUpdateCmd(getCfg func() *config.Config, getSess func() *sessio
 								if len(s) == 0 {
 									return fmt.Errorf("name is required")
 								}
+
 								return nil
 							}),
 
@@ -431,6 +388,7 @@ func newCredentialUpdateCmd(getCfg func() *config.Config, getSess func() *sessio
 								if len(s) == 0 {
 									return fmt.Errorf("username is required")
 								}
+
 								return nil
 							}),
 
@@ -477,6 +435,7 @@ func newCredentialUpdateCmd(getCfg func() *config.Config, getSess func() *sessio
 				// Update metadata
 				metadata.Notes = newNotes
 				metadata.Url = newUrl
+
 				metadataJSON, err := protojson.Marshal(&metadata)
 				if err != nil {
 					return fmt.Errorf("failed to marshal metadata: %w", err)
@@ -496,12 +455,13 @@ func newCredentialUpdateCmd(getCfg func() *config.Config, getSess func() *sessio
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to update credential: %w", err)
 				}
 
 				logrus.Debugf("Credential updated: id=%s, name=%s", secret.ID, secret.Name)
-				fmt.Printf("✓ Credential '%s' updated successfully\n", newName)
-				fmt.Printf("  Status: pending sync\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ Credential '%s' updated successfully\n", newName)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Status: pending sync\n")
 
 				return nil
 			})
@@ -543,7 +503,7 @@ func newCredentialDeleteCmd(_ func() *config.Config, getSess func() *session.Ses
 				}
 
 				if !confirm {
-					fmt.Println("Deletion cancelled")
+					fmt.Fprintln(cmd.OutOrStdout(), "Deletion cancelled")
 					return nil
 				}
 
@@ -552,12 +512,13 @@ func newCredentialDeleteCmd(_ func() *config.Config, getSess func() *session.Ses
 					if errors.Is(err, context.DeadlineExceeded) {
 						return fmt.Errorf("database operation timed out after 30s")
 					}
+
 					return fmt.Errorf("failed to delete credential: %w", err)
 				}
 
 				logrus.Debugf("Credential deleted: id=%s, name=%s", secret.ID, secret.Name)
-				fmt.Printf("✓ Credential '%s' deleted successfully\n", secret.Name)
-				fmt.Printf("  Status: pending sync\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ Credential '%s' deleted successfully\n", secret.Name)
+				fmt.Fprintf(cmd.OutOrStdout(), "  Status: pending sync\n")
 
 				return nil
 			})
@@ -567,4 +528,68 @@ func newCredentialDeleteCmd(_ func() *config.Config, getSess func() *session.Ses
 	cmd.Flags().BoolVarP(&noConfirm, "yes", "y", false, "Skip confirmation prompt")
 
 	return cmd
+}
+
+// promptForCredentialInput prompts user for credential details interactively
+func promptForCredentialInput() (name, username, password, email, url, notes string, err error) {
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Name").
+				Description("A friendly name for this credential (e.g., 'GitHub Account')").
+				Value(&name).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("name is required")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Username").
+				Description("Username or account identifier").
+				Value(&username).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("username is required")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Password").
+				Description("Password for this account").
+				Value(&password).
+				EchoMode(huh.EchoModePassword).
+				Validate(func(s string) error {
+					if len(s) == 0 {
+						return fmt.Errorf("password is required")
+					}
+
+					return nil
+				}),
+
+			huh.NewInput().
+				Title("Email (optional)").
+				Value(&email),
+
+			huh.NewInput().
+				Title("URL (optional)").
+				Description("Website or service URL").
+				Value(&url),
+
+			huh.NewInput().
+				Title("Notes (optional)").
+				Description("Additional notes or comments").
+				Value(&notes),
+		),
+	)
+
+	if err = form.Run(); err != nil {
+		return "", "", "", "", "", "", fmt.Errorf("operation cancelled: %w", err)
+	}
+
+	return name, username, password, email, url, notes, nil
 }

@@ -51,21 +51,7 @@ func TestUnaryAuthInterceptor_UnauthenticatedEndpoints(t *testing.T) {
 
 			_, err := interceptor(ctx, nil, info, handler)
 
-			if tc.shouldPass {
-				if err != nil {
-					t.Errorf("Expected no error for unauthenticated endpoint, got: %v", err)
-				}
-				if !handlerCalled {
-					t.Error("Handler should have been called for unauthenticated endpoint")
-				}
-			} else {
-				if err == nil {
-					t.Error("Expected error for protected endpoint without token")
-				}
-				if handlerCalled {
-					t.Error("Handler should not have been called for protected endpoint without token")
-				}
-			}
+			validateInterceptorResult(t, tc.shouldPass, err, handlerCalled)
 		})
 	}
 }
@@ -460,4 +446,29 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// validateInterceptorResult validates the result of an interceptor call
+func validateInterceptorResult(t *testing.T, shouldPass bool, err error, handlerCalled bool) {
+	t.Helper()
+
+	if shouldPass {
+		if err != nil {
+			t.Errorf("Expected no error for unauthenticated endpoint, got: %v", err)
+		}
+
+		if !handlerCalled {
+			t.Error("Handler should have been called for unauthenticated endpoint")
+		}
+
+		return
+	}
+
+	if err == nil {
+		t.Error("Expected error for protected endpoint without token")
+	}
+
+	if handlerCalled {
+		t.Error("Handler should not have been called for protected endpoint without token")
+	}
 }

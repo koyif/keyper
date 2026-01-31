@@ -57,14 +57,17 @@ func Push(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 	// If no pending secrets, return early
 	if len(pendingSecrets) == 0 {
 		logrus.Debug("No pending secrets to push")
+
 		return &PushResult{
 			Message: "No changes to push",
 		}, nil
 	}
 
 	// Separate deleted and non-deleted secrets
-	var secretsToSend []*pb.Secret
-	var deletedIDs []string
+	var (
+		secretsToSend []*pb.Secret
+		deletedIDs    []string
+	)
 
 	for _, local := range pendingSecrets {
 		if local.IsDeleted {
@@ -75,6 +78,7 @@ func Push(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 				logrus.Debugf("Warning: failed to convert secret %s: %v", local.ID, err)
 				continue
 			}
+
 			secretsToSend = append(secretsToSend, protoSecret)
 		}
 	}
@@ -84,7 +88,7 @@ func Push(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 	// Connect to server with authentication
 	conn, ctx, err := grpcutil.NewAuthenticatedConnection(ctx, cfg.Server, sess.GetAccessToken(), deviceID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to establish authenticated connection: %w", err)
 	}
 	defer conn.Close()
 
@@ -190,6 +194,7 @@ func updateSyncStatusAfterPush(ctx context.Context, repo storage.Repository, acc
 			logrus.Debugf("Warning: failed to update sync status for %s: %v", id, err)
 		}
 	}
+
 	return nil
 }
 
@@ -200,11 +205,15 @@ func updateSyncStatusAfterPush(ctx context.Context, repo storage.Repository, acc
 // 3. Use exponential backoff between retry attempts (max 3 retries)
 // 4. Mark secrets as 'conflict' status if all retries fail
 func PushWithRetry(ctx context.Context, cfg *config.Config, sess *session.Session, repo storage.Repository) (*PushResult, error) {
-	const maxRetries = 3
-	const baseDelay = 1 * time.Second
+	const (
+		maxRetries = 3
+		baseDelay  = 1 * time.Second
+	)
 
-	var lastResult *PushResult
-	var lastErr error
+	var (
+		lastResult *PushResult
+		lastErr    error
+	)
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		// Attempt push
@@ -222,6 +231,7 @@ func PushWithRetry(ctx context.Context, cfg *config.Config, sess *session.Sessio
 			delay := baseDelay * time.Duration(1<<uint(attempt))
 			logrus.Debugf("Retrying push in %v...", delay)
 			time.Sleep(delay)
+
 			continue
 		}
 
@@ -233,6 +243,7 @@ func PushWithRetry(ctx context.Context, cfg *config.Config, sess *session.Sessio
 			if attempt > 0 {
 				logrus.Debugf("Push successful after %d retry attempts", attempt)
 			}
+
 			return result, nil
 		}
 
@@ -252,6 +263,7 @@ func PushWithRetry(ctx context.Context, cfg *config.Config, sess *session.Sessio
 
 		// Trigger Pull to fetch latest server state and merge
 		logrus.Debugf("Triggering pull to fetch latest server state and resolve conflicts...")
+
 		if err := PullAndSync(ctx, cfg, sess, repo); err != nil {
 			logrus.Debugf("Warning: Pull failed during conflict resolution: %v", err)
 			// Continue with retry anyway - the local state might still be valid
@@ -271,5 +283,6 @@ func PushWithRetry(ctx context.Context, cfg *config.Config, sess *session.Sessio
 	if lastResult != nil {
 		return lastResult, nil
 	}
+
 	return nil, fmt.Errorf("push failed after %d attempts: %w", maxRetries+1, lastErr)
 }

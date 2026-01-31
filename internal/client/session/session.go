@@ -44,6 +44,7 @@ func Load(filePath string) (*Session, error) {
 			// No session file exists, return empty session
 			return New(filePath), nil
 		}
+
 		return nil, fmt.Errorf("failed to read session file: %w", err)
 	}
 
@@ -53,6 +54,7 @@ func Load(filePath string) (*Session, error) {
 	}
 
 	s.filePath = filePath
+
 	return &s, nil
 }
 
@@ -68,6 +70,7 @@ func (s *Session) Save() error {
 			break
 		}
 	}
+
 	if dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("failed to create session directory: %w", err)
@@ -109,6 +112,7 @@ func (s *Session) Clear() error {
 func (s *Session) SetEncryptionKey(key []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.encryptionKey = make([]byte, len(key))
 	copy(s.encryptionKey, key)
 }
@@ -116,30 +120,35 @@ func (s *Session) SetEncryptionKey(key []byte) {
 func (s *Session) GetEncryptionKey() []byte {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	if s.encryptionKey == nil {
 		return nil
 	}
 	// Return a copy to prevent modification
 	key := make([]byte, len(s.encryptionKey))
 	copy(key, s.encryptionKey)
+
 	return key
 }
 
 func (s *Session) IsAuthenticated() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	return s.AccessToken != "" && s.RefreshToken != ""
 }
 
 func (s *Session) IsExpired() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	return time.Now().After(s.ExpiresAt)
 }
 
 func (s *Session) UpdateTokens(accessToken, refreshToken string, expiresAt time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.AccessToken = accessToken
 	s.RefreshToken = refreshToken
 	s.ExpiresAt = expiresAt
@@ -148,6 +157,7 @@ func (s *Session) UpdateTokens(accessToken, refreshToken string, expiresAt time.
 func (s *Session) UpdateLastSync() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.LastSyncAt = time.Now()
 }
 
@@ -162,11 +172,12 @@ func (s *Session) RefreshAccessToken(serverAddr string) error {
 
 	conn, err := grpcutil.NewUnauthenticatedConnection(serverAddr)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to connect to server: %w", err)
 	}
 	defer conn.Close()
 
 	client := pb.NewAuthServiceClient(conn)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -214,6 +225,7 @@ func (s *Session) EnsureValidToken(serverAddr string) error {
 func (s *Session) GetAccessToken() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+
 	return s.AccessToken
 }
 

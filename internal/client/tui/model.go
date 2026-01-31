@@ -115,27 +115,39 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.currentScreen {
 	case ScreenLogin:
 		var cmd tea.Cmd
+
 		m.loginScreen, cmd = m.loginScreen.Update(msg)
+
 		return m, cmd
 	case ScreenRegister:
 		var cmd tea.Cmd
+
 		m.registerScreen, cmd = m.registerScreen.Update(msg)
+
 		return m, cmd
 	case ScreenSecretsList:
 		var cmd tea.Cmd
+
 		m.secretsListScreen, cmd = m.secretsListScreen.Update(msg)
+
 		return m, cmd
 	case ScreenSecretDetail:
 		var cmd tea.Cmd
+
 		m.secretDetailScreen, cmd = m.secretDetailScreen.Update(msg)
+
 		return m, cmd
 	case ScreenSecretCreate:
 		var cmd tea.Cmd
+
 		m.secretCreateScreen, cmd = m.secretCreateScreen.Update(msg)
+
 		return m, cmd
 	case ScreenSecretEdit:
 		var cmd tea.Cmd
+
 		m.secretEditScreen, cmd = m.secretEditScreen.Update(msg)
+
 		return m, cmd
 	}
 
@@ -178,18 +190,21 @@ func (m *Model) handleNavigation(msg NavigateMsg) (tea.Model, tea.Cmd) {
 		if m.loginScreen == nil {
 			m.loginScreen = NewLoginScreen(m.ctx, m.cfg, m.sess, m.repo)
 		}
+
 		return m, m.loginScreen.Init()
 
 	case ScreenRegister:
 		if m.registerScreen == nil {
 			m.registerScreen = NewRegisterScreen(m.ctx, m.cfg, m.sess, m.repo)
 		}
+
 		return m, m.registerScreen.Init()
 
 	case ScreenSecretsList:
 		if m.secretsListScreen == nil {
 			m.secretsListScreen = NewSecretsListScreen(m.ctx, m.cfg, m.sess, m.repo)
 		}
+
 		return m, m.secretsListScreen.Init()
 
 	case ScreenSecretDetail:

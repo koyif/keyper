@@ -91,6 +91,7 @@ func (s *SecretsListScreen) Update(msg tea.Msg) (*SecretsListScreen, tea.Cmd) {
 		if s.searchMode {
 			return s.handleSearchMode(msg)
 		}
+
 		return s.handleNormalMode(msg)
 
 	case spinner.TickMsg:
@@ -103,16 +104,19 @@ func (s *SecretsListScreen) Update(msg tea.Msg) (*SecretsListScreen, tea.Cmd) {
 		s.loading = false
 		s.secrets = msg.secrets
 		s.updateTable()
+
 		return s, nil
 
 	case syncStatusMsg:
 		s.pendingCount = msg.pendingCount
 		s.conflictCount = msg.conflictCount
+
 		return s, nil
 
 	case syncCompleteMsg:
 		s.syncing = false
 		s.successMsg = msg.message
+
 		return s, tea.Batch(
 			s.loadSecretsCmd(),
 			s.loadSyncStatusCmd(),
@@ -122,11 +126,13 @@ func (s *SecretsListScreen) Update(msg tea.Msg) (*SecretsListScreen, tea.Cmd) {
 		s.loading = false
 		s.syncing = false
 		s.errorMsg = msg.Error()
+
 		return s, nil
 	}
 
 	// Update table
 	s.table, cmd = s.table.Update(msg)
+
 	return s, cmd
 }
 
@@ -140,6 +146,7 @@ func (s *SecretsListScreen) handleNormalMode(msg tea.KeyMsg) (*SecretsListScreen
 		// View selected secret
 		if len(s.secrets) > 0 && s.table.Cursor() < len(s.secrets) {
 			secret := s.secrets[s.table.Cursor()]
+
 			return s, func() tea.Msg {
 				return NavigateMsg{Screen: ScreenSecretDetail, Data: secret}
 			}
@@ -155,6 +162,7 @@ func (s *SecretsListScreen) handleNormalMode(msg tea.KeyMsg) (*SecretsListScreen
 		// Enter search mode
 		s.searchMode = true
 		s.searchInput.Focus()
+
 		return s, textinput.Blink
 
 	case "s":
@@ -163,6 +171,7 @@ func (s *SecretsListScreen) handleNormalMode(msg tea.KeyMsg) (*SecretsListScreen
 			s.syncing = true
 			s.successMsg = ""
 			s.errorMsg = ""
+
 			return s, tea.Batch(
 				s.spinner.Tick,
 				s.performSyncCmd(),
@@ -172,6 +181,7 @@ func (s *SecretsListScreen) handleNormalMode(msg tea.KeyMsg) (*SecretsListScreen
 	case "r":
 		// Reload secrets
 		s.loading = true
+
 		return s, tea.Batch(
 			s.spinner.Tick,
 			s.loadSecretsCmd(),
@@ -198,7 +208,9 @@ func (s *SecretsListScreen) handleNormalMode(msg tea.KeyMsg) (*SecretsListScreen
 	}
 
 	var cmd tea.Cmd
+
 	s.table, cmd = s.table.Update(msg)
+
 	return s, cmd
 }
 
@@ -213,6 +225,7 @@ func (s *SecretsListScreen) handleSearchMode(msg tea.KeyMsg) (*SecretsListScreen
 		s.searchInput.Blur()
 		s.searchQuery = ""
 		s.updateTable()
+
 		return s, nil
 
 	case "enter":
@@ -221,10 +234,12 @@ func (s *SecretsListScreen) handleSearchMode(msg tea.KeyMsg) (*SecretsListScreen
 		s.searchInput.Blur()
 		s.searchQuery = s.searchInput.Value()
 		s.updateTable()
+
 		return s, nil
 	}
 
 	s.searchInput, cmd = s.searchInput.Update(msg)
+
 	return s, cmd
 }
 
@@ -368,6 +383,7 @@ func (s *SecretsListScreen) loadSecrets() {
 		s.errorMsg = fmt.Sprintf("Failed to load secrets: %v", err)
 		return
 	}
+
 	s.secrets = secrets
 	s.updateTable()
 }
@@ -381,6 +397,7 @@ func (s *SecretsListScreen) loadSecretsCmd() tea.Cmd {
 		if err != nil {
 			return errorMsg{err}
 		}
+
 		return secretsLoadedMsg{secrets: secrets}
 	}
 }
@@ -409,6 +426,7 @@ func (s *SecretsListScreen) loadSyncStatusCmd() tea.Cmd {
 func (s *SecretsListScreen) performSyncCmd() tea.Cmd {
 	return func() tea.Msg {
 		opts := &sync.SyncOptions{}
+
 		result, err := sync.Sync(s.ctx, s.cfg, s.sess, s.repo, opts)
 		if err != nil {
 			return errorMsg{err}

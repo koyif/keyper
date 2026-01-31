@@ -43,6 +43,7 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := getCfg()
 			sess := getSess()
+
 			var username, password, confirmPassword string
 
 			// Create form for registration
@@ -56,6 +57,7 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 							if len(s) < 3 {
 								return fmt.Errorf("username must be at least 3 characters")
 							}
+
 							return nil
 						}),
 
@@ -68,6 +70,7 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 							if len(s) < 8 {
 								return fmt.Errorf("password must be at least 8 characters")
 							}
+
 							return nil
 						}),
 
@@ -79,6 +82,7 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 							if s != password {
 								return fmt.Errorf("passwords do not match")
 							}
+
 							return nil
 						}),
 				),
@@ -98,6 +102,7 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 
 			// Derive encryption key from master password
 			encryptionKey := crypto.DeriveKey(password, salt)
+
 			logrus.Debug("Encryption key derived")
 
 			// Hash master password for authentication
@@ -105,7 +110,9 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 			if err != nil {
 				return fmt.Errorf("failed to generate auth salt: %w", err)
 			}
+
 			authHash := crypto.HashMasterPassword(password, authSalt)
+
 			logrus.Debug("Authentication hash generated")
 
 			// Generate encryption key verifier
@@ -117,11 +124,12 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 			// Connect to server (unauthenticated for registration)
 			conn, err := grpcutil.NewUnauthenticatedConnection(cfg.Server)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to connect to server: %w", err)
 			}
 			defer conn.Close()
 
 			client := pb.NewAuthServiceClient(conn)
+
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
@@ -167,6 +175,7 @@ func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session, 
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := getCfg()
 			sess := getSess()
+
 			var username, password string
 
 			// Create form for login
@@ -179,6 +188,7 @@ func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session, 
 							if len(s) == 0 {
 								return fmt.Errorf("username is required")
 							}
+
 							return nil
 						}),
 
@@ -190,6 +200,7 @@ func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session, 
 							if len(s) == 0 {
 								return fmt.Errorf("password is required")
 							}
+
 							return nil
 						}),
 				),
@@ -216,16 +227,18 @@ func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session, 
 			if err != nil {
 				return fmt.Errorf("failed to generate auth salt: %w", err)
 			}
+
 			authHash := crypto.HashMasterPassword(password, authSalt)
 
 			// Connect to server (unauthenticated for login)
 			conn, err := grpcutil.NewUnauthenticatedConnection(cfg.Server)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed to connect to server: %w", err)
 			}
 			defer conn.Close()
 
 			client := pb.NewAuthServiceClient(conn)
+
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
@@ -257,8 +270,10 @@ func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session, 
 			// Trigger automatic sync after login (unless --no-sync flag is set)
 			if !noSync {
 				fmt.Fprintln(cmd.OutOrStdout())
+
 				syncCtx, syncCancel := session.DatabaseContext()
 				defer syncCancel()
+
 				if err := performAutoSync(syncCtx, cfg, sess, getStorage); err != nil {
 					// Log warning but don't fail the login
 					logrus.Warnf("Automatic sync failed: %v", err)
@@ -302,6 +317,7 @@ func newLogoutCmd(getCfg func() *config.Config, getSess func() *session.Session)
 				defer conn.Close()
 
 				client := pb.NewAuthServiceClient(conn)
+
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 

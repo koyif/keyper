@@ -88,6 +88,7 @@ func (tc *TestContainer) runMigrations(t *testing.T) {
 	// Open database connection using database/sql for migrations.
 	sqlDB, err := sql.Open("pgx", tc.connStr)
 	require.NoError(t, err, "failed to open database connection")
+
 	defer sqlDB.Close()
 
 	// Create migration driver.
@@ -106,6 +107,7 @@ func (tc *TestContainer) runMigrations(t *testing.T) {
 		driver,
 	)
 	require.NoError(t, err, "failed to create migrate instance")
+
 	defer m.Close()
 
 	// Run all migrations.
@@ -187,6 +189,7 @@ func (tc *TestContainer) Config(t *testing.T) *db.Config {
 // Exec executes a SQL statement and returns the result.
 func (tc *TestContainer) Exec(ctx context.Context, t *testing.T, query string, args ...interface{}) {
 	t.Helper()
+
 	_, err := tc.pool.Exec(ctx, query, args...)
 	require.NoError(t, err, "failed to execute query: %s", query)
 }
@@ -197,6 +200,7 @@ func (tc *TestContainer) Query(ctx context.Context, t *testing.T, query string, 
 
 	// Get a database/sql connection from the pool for compatibility with sql.Rows.
 	sqlDB := stdlib.OpenDB(*tc.pool.Config().ConnConfig)
+
 	t.Cleanup(func() { sqlDB.Close() })
 
 	rows, err := sqlDB.QueryContext(ctx, query, args...)
@@ -248,6 +252,7 @@ func findMigrationsDir() (string, error) {
 			// Reached root without finding migrations.
 			return "", fmt.Errorf("migrations directory not found")
 		}
+
 		dir = parent
 	}
 }

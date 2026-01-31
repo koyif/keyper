@@ -11,5 +11,6 @@ func requireAuth(sess *session.Session) error {
 	if !sess.IsAuthenticated() {
 		return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
 	}
+
 	return nil
 }

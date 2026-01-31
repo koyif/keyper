@@ -31,7 +31,9 @@ func (r *RefreshTokenRepository) Create(ctx context.Context, userID uuid.UUID, t
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	var token repository.RefreshToken
+
 	err := q.QueryRow(ctx, query, userID, tokenHash, deviceID, expiresAt).Scan(
 		&token.ID,
 		&token.UserID,
@@ -56,7 +58,9 @@ func (r *RefreshTokenRepository) GetByTokenHash(ctx context.Context, tokenHash [
 	`
 
 	q := getQuerier(ctx, r.pool)
+
 	var token repository.RefreshToken
+
 	err := q.QueryRow(ctx, query, tokenHash).Scan(
 		&token.ID,
 		&token.UserID,
@@ -69,6 +73,7 @@ func (r *RefreshTokenRepository) GetByTokenHash(ctx context.Context, tokenHash [
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, repository.ErrNotFound
 		}
+
 		return nil, fmt.Errorf("failed to get refresh token: %w", err)
 	}
 
@@ -79,6 +84,7 @@ func (r *RefreshTokenRepository) DeleteByID(ctx context.Context, id uuid.UUID) e
 	query := `DELETE FROM refresh_tokens WHERE id = $1`
 
 	q := getQuerier(ctx, r.pool)
+
 	result, err := q.Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("failed to delete refresh token: %w", err)
@@ -96,6 +102,7 @@ func (r *RefreshTokenRepository) DeleteExpired(ctx context.Context) (int64, erro
 	query := `DELETE FROM refresh_tokens WHERE expires_at <= CURRENT_TIMESTAMP`
 
 	q := getQuerier(ctx, r.pool)
+
 	result, err := q.Exec(ctx, query)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete expired refresh tokens: %w", err)
