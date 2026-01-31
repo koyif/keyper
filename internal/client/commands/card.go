@@ -1,8 +1,10 @@
+//nolint:forbidigo // CLI command requires user output via fmt.Print* for results
 package commands
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -130,8 +132,8 @@ func newCardAddCmd(getCfg func() *config.Config, getSess func() *session.Session
 		Long:  "Create a new bank card with cardholder, number, expiry, CVV, and optional PIN",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			var name, cardholder, number, expiryMonth, expiryYear, cvv, pin, bankName, notes string
@@ -325,27 +327,25 @@ func newCardAddCmd(getCfg func() *config.Config, getSess func() *session.Session
 			}
 
 			// Store in database
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				if err := repo.Create(ctx, secret); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to store card: %w", err)
+				}
 
-			ctx := context.Background()
-			if err := repo.Create(ctx, secret); err != nil {
-				return fmt.Errorf("failed to store card: %w", err)
-			}
+				logrus.Debugf("Card created: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Card '%s' added successfully\n", name)
+				fmt.Printf("  ID: %s\n", secret.ID)
+				if bankName != "" {
+					fmt.Printf("  Bank: %s\n", bankName)
+				}
+				fmt.Printf("  Last 4 digits: •••• %s\n", cardMeta.Last4Digits)
+				fmt.Printf("  Status: pending sync\n")
 
-			logrus.Debugf("Card created: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Card '%s' added successfully\n", name)
-			fmt.Printf("  ID: %s\n", secret.ID)
-			if bankName != "" {
-				fmt.Printf("  Bank: %s\n", bankName)
-			}
-			fmt.Printf("  Last 4 digits: •••• %s\n", cardMeta.Last4Digits)
-			fmt.Printf("  Status: pending sync\n")
-
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -372,70 +372,67 @@ func newCardGetCmd(_ func() *config.Config, getSess func() *session.Session, get
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get and validate secret
+				secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_BANK_CARD)
+				if err != nil {
+					return err
+				}
 
-			ctx := context.Background()
+				encryptionKey := sess.GetEncryptionKey()
+				if encryptionKey == nil {
+					return fmt.Errorf("encryption key not found in session")
+				}
 
-			// Get and validate secret
-			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_BANK_CARD)
-			if err != nil {
-				return err
-			}
+				decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
+				if err != nil {
+					return fmt.Errorf("failed to decrypt secret: %w", err)
+				}
 
-			// Decrypt the data
-			decryptedData, err := decryptSecret(secret, sess)
-			if err != nil {
-				return err
-			}
+				// Unmarshal card data
+				var cardData pb.BankCardData
+				if err := protojson.Unmarshal(decryptedData, &cardData); err != nil {
+					return fmt.Errorf("failed to unmarshal card data: %w", err)
+				}
 
-			// Unmarshal card data
-			var cardData pb.BankCardData
-			if err := protojson.Unmarshal(decryptedData, &cardData); err != nil {
-				return fmt.Errorf("failed to unmarshal card data: %w", err)
-			}
+				// Display card
+				fmt.Printf("\nBank Card: %s\n", secret.Name)
+				fmt.Printf("ID: %s\n", secret.ID)
+				fmt.Println(strings.Repeat("-", 80))
+				fmt.Printf("Cardholder: %s\n", cardData.CardholderName)
+				fmt.Printf("Card Number: %s\n", cardData.CardNumber)
+				fmt.Printf("Expiry: %s/%s\n", cardData.ExpiryMonth, cardData.ExpiryYear)
+				fmt.Printf("CVV: %s\n", cardData.Cvv)
+				if cardData.Pin != "" {
+					fmt.Printf("PIN: %s\n", cardData.Pin)
+				}
+				if cardData.BankName != "" {
+					fmt.Printf("Bank: %s\n", cardData.BankName)
+				}
 
-			// Display card
-			fmt.Printf("\nBank Card: %s\n", secret.Name)
-			fmt.Printf("ID: %s\n", secret.ID)
-			fmt.Println(strings.Repeat("-", 80))
-			fmt.Printf("Cardholder: %s\n", cardData.CardholderName)
-			fmt.Printf("Card Number: %s\n", cardData.CardNumber)
-			fmt.Printf("Expiry: %s/%s\n", cardData.ExpiryMonth, cardData.ExpiryYear)
-			fmt.Printf("CVV: %s\n", cardData.Cvv)
-			if cardData.Pin != "" {
-				fmt.Printf("PIN: %s\n", cardData.Pin)
-			}
-			if cardData.BankName != "" {
-				fmt.Printf("Bank: %s\n", cardData.BankName)
-			}
-
-			// Display metadata if present
-			if secret.Metadata != "" {
-				var cardMeta CardMetadata
-				if err := json.Unmarshal([]byte(secret.Metadata), &cardMeta); err == nil {
-					if cardMeta.Notes != "" {
-						fmt.Printf("Notes: %s\n", cardMeta.Notes)
+				// Display metadata if present
+				if secret.Metadata != "" {
+					var cardMeta CardMetadata
+					if err := json.Unmarshal([]byte(secret.Metadata), &cardMeta); err == nil {
+						if cardMeta.Notes != "" {
+							fmt.Printf("Notes: %s\n", cardMeta.Notes)
+						}
 					}
 				}
-			}
 
-			fmt.Println(strings.Repeat("-", 80))
-			fmt.Printf("Created: %s\n", secret.CreatedAt.Format(time.RFC3339))
-			fmt.Printf("Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
-			fmt.Printf("Sync Status: %s\n", secret.SyncStatus)
+				fmt.Println(strings.Repeat("-", 80))
+				fmt.Printf("Created: %s\n", secret.CreatedAt.Format(time.RFC3339))
+				fmt.Printf("Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
+				fmt.Printf("Sync Status: %s\n", secret.SyncStatus)
 
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -453,74 +450,71 @@ func newCardListCmd(_ func() *config.Config, getSess func() *session.Session, ge
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				cardType := pb.SecretType_SECRET_TYPE_BANK_CARD
 
-			ctx := context.Background()
-			cardType := pb.SecretType_SECRET_TYPE_BANK_CARD
-
-			// List cards
-			secrets, err := repo.List(ctx, storage.ListFilters{
-				Type:           &cardType,
-				IncludeDeleted: showDeleted,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to list cards: %w", err)
-			}
-
-			if len(secrets) == 0 {
-				fmt.Println("No bank cards found")
-				return nil
-			}
-
-			// Display cards
-			fmt.Printf("\nBank Cards (%d):\n", len(secrets))
-			fmt.Println(strings.Repeat("-", 80))
-
-			for _, secret := range secrets {
-				status := "✓"
-				if secret.SyncStatus == storage.SyncStatusPending {
-					status = "⏳"
-				} else if secret.SyncStatus == storage.SyncStatusConflict {
-					status = "⚠"
-				}
-				if secret.IsDeleted {
-					status = "🗑"
+				// List cards
+				secrets, err := repo.List(ctx, storage.ListFilters{
+					Type:           &cardType,
+					IncludeDeleted: showDeleted,
+				})
+				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to list cards: %w", err)
 				}
 
-				// Get metadata for display
-				var cardMeta CardMetadata
-				info := ""
-				if secret.Metadata != "" {
-					if err := json.Unmarshal([]byte(secret.Metadata), &cardMeta); err == nil {
-						parts := []string{}
-						if cardMeta.Last4Digits != "" {
-							parts = append(parts, "•••• "+cardMeta.Last4Digits)
-						}
-						if cardMeta.BankName != "" {
-							parts = append(parts, cardMeta.BankName)
-						}
-						if len(parts) > 0 {
-							info = " (" + strings.Join(parts, ", ") + ")"
+				if len(secrets) == 0 {
+					fmt.Println("No bank cards found")
+					return nil
+				}
+
+				// Display cards
+				fmt.Printf("\nBank Cards (%d):\n", len(secrets))
+				fmt.Println(strings.Repeat("-", 80))
+
+				for _, secret := range secrets {
+					status := "✓"
+					if secret.SyncStatus == storage.SyncStatusPending {
+						status = "⏳"
+					} else if secret.SyncStatus == storage.SyncStatusConflict {
+						status = "⚠"
+					}
+					if secret.IsDeleted {
+						status = "🗑"
+					}
+
+					// Get metadata for display
+					var cardMeta CardMetadata
+					info := ""
+					if secret.Metadata != "" {
+						if err := json.Unmarshal([]byte(secret.Metadata), &cardMeta); err == nil {
+							parts := []string{}
+							if cardMeta.Last4Digits != "" {
+								parts = append(parts, "•••• "+cardMeta.Last4Digits)
+							}
+							if cardMeta.BankName != "" {
+								parts = append(parts, cardMeta.BankName)
+							}
+							if len(parts) > 0 {
+								info = " (" + strings.Join(parts, ", ") + ")"
+							}
 						}
 					}
+
+					fmt.Printf("%s %-36s  %s%s\n", status, secret.ID[:8]+"...", secret.Name, info)
 				}
 
-				fmt.Printf("%s %-36s  %s%s\n", status, secret.ID[:8]+"...", secret.Name, info)
-			}
+				fmt.Println(strings.Repeat("-", 80))
+				fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
 
-			fmt.Println(strings.Repeat("-", 80))
-			fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
-
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -538,203 +532,199 @@ func newCardUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get and validate secret
+				secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_BANK_CARD)
+				if err != nil {
+					return err
+				}
 
-			ctx := context.Background()
+				// Decrypt existing data
+				encryptionKey := sess.GetEncryptionKey()
+				if encryptionKey == nil {
+					return fmt.Errorf("encryption key not found in session")
+				}
 
-			// Get and validate secret
-			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_BANK_CARD)
-			if err != nil {
-				return err
-			}
+				decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
+				if err != nil {
+					return fmt.Errorf("failed to decrypt card: %w", err)
+				}
 
-			// Decrypt existing data
-			encryptionKey := sess.GetEncryptionKey()
-			if encryptionKey == nil {
-				return fmt.Errorf("encryption key not found in session")
-			}
+				var cardData pb.BankCardData
+				if err := protojson.Unmarshal(decryptedData, &cardData); err != nil {
+					return fmt.Errorf("failed to unmarshal card data: %w", err)
+				}
 
-			decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
-			if err != nil {
-				return fmt.Errorf("failed to decrypt card: %w", err)
-			}
+				// Prompt for updates
+				newName := secret.Name
+				newCardholder := cardData.CardholderName
+				newNumber := cardData.CardNumber
+				newExpiryMonth := cardData.ExpiryMonth
+				newExpiryYear := cardData.ExpiryYear
+				newCvv := cardData.Cvv
+				newPin := cardData.Pin
+				newBankName := cardData.BankName
 
-			var cardData pb.BankCardData
-			if err := protojson.Unmarshal(decryptedData, &cardData); err != nil {
-				return fmt.Errorf("failed to unmarshal card data: %w", err)
-			}
+				var cardMeta CardMetadata
+				if secret.Metadata != "" {
+					json.Unmarshal([]byte(secret.Metadata), &cardMeta)
+				}
+				newNotes := cardMeta.Notes
 
-			// Prompt for updates
-			newName := secret.Name
-			newCardholder := cardData.CardholderName
-			newNumber := cardData.CardNumber
-			newExpiryMonth := cardData.ExpiryMonth
-			newExpiryYear := cardData.ExpiryYear
-			newCvv := cardData.Cvv
-			newPin := cardData.Pin
-			newBankName := cardData.BankName
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewInput().
+							Title("Name").
+							Value(&newName).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("name is required")
+								}
+								return nil
+							}),
 
-			var cardMeta CardMetadata
-			if secret.Metadata != "" {
-				json.Unmarshal([]byte(secret.Metadata), &cardMeta)
-			}
-			newNotes := cardMeta.Notes
+						huh.NewInput().
+							Title("Cardholder Name").
+							Value(&newCardholder).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("cardholder name is required")
+								}
+								return nil
+							}),
 
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewInput().
-						Title("Name").
-						Value(&newName).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("name is required")
-							}
-							return nil
-						}),
+						huh.NewInput().
+							Title("Card Number").
+							Value(&newNumber).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("card number is required")
+								}
+								return validateCardNumber(s)
+							}),
 
-					huh.NewInput().
-						Title("Cardholder Name").
-						Value(&newCardholder).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("cardholder name is required")
-							}
-							return nil
-						}),
+						huh.NewInput().
+							Title("Expiry Month (MM)").
+							Value(&newExpiryMonth).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("expiry month is required")
+								}
+								month, err := strconv.Atoi(s)
+								if err != nil || month < 1 || month > 12 {
+									return fmt.Errorf("must be 01-12")
+								}
+								return nil
+							}),
 
-					huh.NewInput().
-						Title("Card Number").
-						Value(&newNumber).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("card number is required")
-							}
-							return validateCardNumber(s)
-						}),
+						huh.NewInput().
+							Title("Expiry Year (YYYY)").
+							Value(&newExpiryYear).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("expiry year is required")
+								}
+								_, err := strconv.Atoi(s)
+								if err != nil || len(s) != 4 {
+									return fmt.Errorf("must be a 4-digit year")
+								}
+								return nil
+							}),
 
-					huh.NewInput().
-						Title("Expiry Month (MM)").
-						Value(&newExpiryMonth).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("expiry month is required")
-							}
-							month, err := strconv.Atoi(s)
-							if err != nil || month < 1 || month > 12 {
-								return fmt.Errorf("must be 01-12")
-							}
-							return nil
-						}),
+						huh.NewInput().
+							Title("CVV").
+							Value(&newCvv).
+							EchoMode(huh.EchoModePassword).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("CVV is required")
+								}
+								if len(s) < 3 || len(s) > 4 {
+									return fmt.Errorf("CVV must be 3 or 4 digits")
+								}
+								return nil
+							}),
 
-					huh.NewInput().
-						Title("Expiry Year (YYYY)").
-						Value(&newExpiryYear).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("expiry year is required")
-							}
-							_, err := strconv.Atoi(s)
-							if err != nil || len(s) != 4 {
-								return fmt.Errorf("must be a 4-digit year")
-							}
-							return nil
-						}),
+						huh.NewInput().
+							Title("PIN").
+							Value(&newPin).
+							EchoMode(huh.EchoModePassword),
 
-					huh.NewInput().
-						Title("CVV").
-						Value(&newCvv).
-						EchoMode(huh.EchoModePassword).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("CVV is required")
-							}
-							if len(s) < 3 || len(s) > 4 {
-								return fmt.Errorf("CVV must be 3 or 4 digits")
-							}
-							return nil
-						}),
+						huh.NewInput().
+							Title("Bank Name").
+							Value(&newBankName),
 
-					huh.NewInput().
-						Title("PIN").
-						Value(&newPin).
-						EchoMode(huh.EchoModePassword),
+						huh.NewInput().
+							Title("Notes").
+							Value(&newNotes),
+					),
+				)
 
-					huh.NewInput().
-						Title("Bank Name").
-						Value(&newBankName),
+				if err := form.Run(); err != nil {
+					return fmt.Errorf("operation cancelled: %w", err)
+				}
 
-					huh.NewInput().
-						Title("Notes").
-						Value(&newNotes),
-				),
-			)
+				// Format card number
+				newNumber = formatCardNumber(newNumber)
 
-			if err := form.Run(); err != nil {
-				return fmt.Errorf("operation cancelled: %w", err)
-			}
+				// Update card data
+				cardData.CardholderName = newCardholder
+				cardData.CardNumber = newNumber
+				cardData.ExpiryMonth = newExpiryMonth
+				cardData.ExpiryYear = newExpiryYear
+				cardData.Cvv = newCvv
+				cardData.Pin = newPin
+				cardData.BankName = newBankName
 
-			// Format card number
-			newNumber = formatCardNumber(newNumber)
+				// Marshal and encrypt
+				cardJSON, err := protojson.Marshal(&cardData)
+				if err != nil {
+					return fmt.Errorf("failed to marshal card data: %w", err)
+				}
 
-			// Update card data
-			cardData.CardholderName = newCardholder
-			cardData.CardNumber = newNumber
-			cardData.ExpiryMonth = newExpiryMonth
-			cardData.ExpiryYear = newExpiryYear
-			cardData.Cvv = newCvv
-			cardData.Pin = newPin
-			cardData.BankName = newBankName
+				encryptedData, err := crypto.Encrypt(cardJSON, encryptionKey)
+				if err != nil {
+					return fmt.Errorf("failed to encrypt card: %w", err)
+				}
 
-			// Marshal and encrypt
-			cardJSON, err := protojson.Marshal(&cardData)
-			if err != nil {
-				return fmt.Errorf("failed to marshal card data: %w", err)
-			}
+				// Update metadata
+				cardMeta.Last4Digits = getLast4Digits(newNumber)
+				cardMeta.BankName = newBankName
+				cardMeta.Notes = newNotes
+				metadataJSON, err := json.Marshal(cardMeta)
+				if err != nil {
+					return fmt.Errorf("failed to marshal metadata: %w", err)
+				}
 
-			encryptedData, err := crypto.Encrypt(cardJSON, encryptionKey)
-			if err != nil {
-				return fmt.Errorf("failed to encrypt card: %w", err)
-			}
+				// Update secret
+				secret.Name = newName
+				secret.EncryptedData = []byte(encryptedData)
+				secret.Nonce = []byte{} // Nonce is embedded in encrypted data
+				secret.Metadata = string(metadataJSON)
+				secret.Version++
+				secret.SyncStatus = storage.SyncStatusPending
+				secret.UpdatedAt = time.Now()
+				secret.LocalUpdatedAt = time.Now()
 
-			// Update metadata
-			cardMeta.Last4Digits = getLast4Digits(newNumber)
-			cardMeta.BankName = newBankName
-			cardMeta.Notes = newNotes
-			metadataJSON, err := json.Marshal(cardMeta)
-			if err != nil {
-				return fmt.Errorf("failed to marshal metadata: %w", err)
-			}
+				if err := repo.Update(ctx, secret); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to update card: %w", err)
+				}
 
-			// Update secret
-			secret.Name = newName
-			secret.EncryptedData = []byte(encryptedData)
-			secret.Nonce = []byte{} // Nonce is embedded in encrypted data
-			secret.Metadata = string(metadataJSON)
-			secret.Version++
-			secret.SyncStatus = storage.SyncStatusPending
-			secret.UpdatedAt = time.Now()
-			secret.LocalUpdatedAt = time.Now()
+				logrus.Debugf("Card updated: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Card '%s' updated successfully\n", newName)
+				fmt.Printf("  Status: pending sync\n")
 
-			if err := repo.Update(ctx, secret); err != nil {
-				return fmt.Errorf("failed to update card: %w", err)
-			}
-
-			logrus.Debugf("Card updated: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Card '%s' updated successfully\n", newName)
-			fmt.Printf("  Status: pending sync\n")
-
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -753,48 +743,44 @@ func newCardDeleteCmd(_ func() *config.Config, getSess func() *session.Session, 
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get and validate secret
+				secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_BANK_CARD)
+				if err != nil {
+					return err
+				}
 
-			ctx := context.Background()
+				// Confirm deletion
+				confirm, err := confirmDeletion(secret.Name, "card", noConfirm)
+				if err != nil {
+					return err
+				}
 
-			// Get and validate secret
-			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_BANK_CARD)
-			if err != nil {
-				return err
-			}
+				if !confirm {
+					fmt.Println("Deletion cancelled")
+					return nil
+				}
 
-			// Confirm deletion
-			confirm, err := confirmDeletion(secret.Name, "card", noConfirm)
-			if err != nil {
-				return err
-			}
+				// Delete (soft delete)
+				if err := repo.Delete(ctx, secret.ID); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to delete card: %w", err)
+				}
 
-			if !confirm {
-				fmt.Println("Deletion cancelled")
+				logrus.Debugf("Card deleted: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Card '%s' deleted successfully\n", secret.Name)
+				fmt.Printf("  Status: pending sync\n")
+
 				return nil
-			}
-
-			// Delete (soft delete)
-			if err := repo.Delete(ctx, secret.ID); err != nil {
-				return fmt.Errorf("failed to delete card: %w", err)
-			}
-
-			logrus.Debugf("Card deleted: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Card '%s' deleted successfully\n", secret.Name)
-			fmt.Printf("  Status: pending sync\n")
-
-			return nil
+			})
 		},
 	}
 

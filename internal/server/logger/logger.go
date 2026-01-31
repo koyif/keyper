@@ -2,6 +2,7 @@ package logger
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"go.uber.org/zap"
@@ -57,7 +58,7 @@ func Initialize(env string) error {
 	}
 
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to build logger: %w", err)
 	}
 
 	globalLogger = logger
@@ -78,8 +79,11 @@ func Get() *zap.Logger {
 // Should be called before application shutdown.
 func Sync() error {
 	if globalLogger != nil {
-		return globalLogger.Sync()
+		if err := globalLogger.Sync(); err != nil {
+			return fmt.Errorf("failed to sync logger: %w", err) //nolint:wrapcheck // zap sync error wrapped
+		}
 	}
+
 	return nil
 }
 

@@ -175,29 +175,114 @@ func TestCardCommands(t *testing.T) {
 
 func TestLuhnValidation(t *testing.T) {
 	tests := []struct {
-		name        string
-		cardNumber  string
-		shouldError bool
+		name       string
+		cardNumber string
+		wantErr    bool
 	}{
+		// Valid cards from different networks
 		{"Valid Visa", "4532 0151 1283 0366", false},
 		{"Valid Visa (no spaces)", "4532015112830366", false},
 		{"Valid Mastercard", "5425 2334 3010 9903", false},
 		{"Valid Amex", "3782 822463 10005", false},
 		{"Valid Discover", "6011 1111 1111 1117", false},
+		{"Valid JCB", "3530 1113 3330 0000", false},
+		{"Valid Diners Club", "3056 9309 0259 04", false},
+
+		// Valid cards with dashes
+		{"Valid Visa with dashes", "4532-0151-1283-0366", false},
+		{"Valid Mastercard with dashes", "5425-2334-3010-9903", false},
+
+		// Edge cases - valid length boundaries
+		{"Exactly 13 digits (minimum)", "4222 2222 2222 2", false},
+		{"Exactly 19 digits (maximum)", "6229 2501 0000 0001 002", false},
+
+		// Invalid checksums
 		{"Invalid checksum", "4532 0151 1283 0367", true},
+		{"Invalid checksum variation 1", "4532 0151 1283 0365", true},
+		{"Invalid checksum variation 2", "5425 2334 3010 9904", true},
+		{"Invalid checksum variation 3", "3782 822463 10006", true},
+
+		// Edge cases - all zeros/nines with valid length
+		{"All zeros (16 digits, passes Luhn)", "0000 0000 0000 0000", false},
+		{"All nines (16 digits, invalid checksum)", "9999 9999 9999 9999", true},
+
+		// Invalid length
 		{"Too short", "4532 1488", true},
-		{"Too long", "4532 0151 1283 0366 1234", true},
+		{"12 digits (below minimum)", "4532 0151 1283", true},
+		{"20 digits (above maximum)", "4532 0151 1283 0366 1234", true},
+
+		// Invalid characters
 		{"Contains letters", "4532 015A 1283 0366", true},
+		{"Contains special characters", "4532@0151#1283$0366", true},
+		{"Mixed alphanumeric", "4532A151B283C366", true},
+
+		// Empty and whitespace
+		{"Empty string", "", true},
+		{"Whitespace only", "    ", true},
+		{"Tabs and spaces", "\t\t  \t", true},
+
+		// Mixed separators
+		{"Mixed spaces and dashes", "4532-0151 1283-0366", false},
+		{"Multiple consecutive spaces", "4532  0151  1283  0366", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateCardNumber(tt.cardNumber)
-			if tt.shouldError && err == nil {
-				t.Errorf("Expected error for %s, got nil", tt.cardNumber)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateCardNumber(%s) error = %v, wantErr %v", tt.cardNumber, err, tt.wantErr)
 			}
-			if !tt.shouldError && err != nil {
-				t.Errorf("Expected no error for %s, got %v", tt.cardNumber, err)
+		})
+	}
+}
+
+func TestCardNetworkPatterns(t *testing.T) {
+	// Table-driven test for various card network identification patterns
+	tests := []struct {
+		name       string
+		cardNumber string
+		wantErr    bool
+	}{
+		{"Visa starting with 4", "4532 0151 1283 0366", false},
+		{"Visa 13 digits", "4222 2222 2222 2", false},
+		{"Mastercard 51", "5105 1051 0510 5100", false},
+		{"Mastercard 55", "5555 5555 5555 4444", false},
+		{"Amex starting with 34", "3434 343434 34343", false},
+		{"Amex starting with 37", "3782 822463 10005", false},
+		{"Discover starting with 6011", "6011 1111 1111 1117", false},
+		{"Discover starting with 65", "6510 0000 0000 0000", false},
+		{"JCB starting with 35", "3530 1113 3330 0000", false},
+		{"Diners Club starting with 30", "3056 9309 0259 04", false},
+		{"Diners Club starting with 36", "3600 0000 0000 08", false},
+		{"Diners Club starting with 38", "3814 0000 0000 001", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCardNumber(tt.cardNumber)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateCardNumber(%s) error = %v, wantErr %v", tt.cardNumber, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func BenchmarkLuhnValidation(b *testing.B) {
+	benchmarks := []struct {
+		name       string
+		cardNumber string
+	}{
+		{"Valid 16-digit no separators", "4532015112830366"},
+		{"Valid 16-digit with spaces", "4532 0151 1283 0366"},
+		{"Invalid checksum", "4532015112830367"},
+		{"Invalid length (short circuit)", "4532"},
+	}
+
+	for _, bm := range benchmarks {
+		b.Run(bm.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = validateCardNumber(bm.cardNumber)
 			}
 		})
 	}

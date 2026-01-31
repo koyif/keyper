@@ -59,7 +59,7 @@ with client-side encryption.`,
 		}
 
 		if err := cfg.ValidateFormat(); err != nil {
-			return err
+			return fmt.Errorf("invalid format: %w", err)
 		}
 
 		if cfg.Verbose {

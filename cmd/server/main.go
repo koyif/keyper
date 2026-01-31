@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/koyif/keyper/internal/server/auth"
+	"github.com/koyif/keyper/internal/server/config"
 	"github.com/koyif/keyper/internal/server/db"
 	"github.com/koyif/keyper/internal/server/handlers"
 	"github.com/koyif/keyper/internal/server/health"
@@ -43,18 +44,23 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Use standard log for initial startup before logger is initialized
+	//nolint:forbidigo // Early startup logging before structured logger is initialized
 	log.Println("Starting Keyper server...")
+	//nolint:forbidigo // Early startup logging before structured logger is initialized
 	log.Printf("Version: %s, Commit: %s, Build Date: %s", version, commit, buildDate)
 
 	cfg := loadConfig()
 
-	// Initialize structured logger.
 	env := logger.GetEnv()
 	if err := logger.Initialize(env); err != nil {
+		//nolint:forbidigo // Early fatal error before logger is available
 		log.Fatalf("Failed to initialize logger: %v", err)
 	}
+
 	defer func() {
 		if err := logger.Sync(); err != nil {
+			//nolint:forbidigo // Logger sync error in defer, structured logger may not be available
 			log.Printf("Error syncing logger: %v", err)
 		}
 	}()
@@ -67,7 +73,6 @@ func main() {
 		zap.String("environment", env),
 	)
 
-	// Initialize database connection pool.
 	ctx := context.Background()
 	pool, err := db.NewPool(ctx, &cfg.Database)
 	if err != nil {
@@ -77,45 +82,43 @@ func main() {
 
 	zapLogger.Info("Database initialized successfully")
 
-	// Initialize repositories.
 	userRepo := postgres.NewUserRepository(pool.Pool)
 	refreshTokenRepo := postgres.NewRefreshTokenRepository(pool.Pool)
 	secretRepo := postgres.NewSecretRepository(pool.Pool)
 
-	// Initialize transactor for multi-step operations.
 	transactor := postgres.NewTransactor(pool.Pool)
 
-	// Initialize JWT manager.
 	jwtManager := auth.NewJWTManager(cfg.Auth.JWTSecret)
 	zapLogger.Info("JWT manager initialized")
 
-	// Initialize token blacklist with 1 hour cleanup interval.
-	tokenBlacklist := auth.NewTokenBlacklist(1 * time.Hour)
+	tokenBlacklist := auth.NewTokenBlacklist(cfg.Limits.TokenCleanupInterval)
 	defer tokenBlacklist.Stop()
 	zapLogger.Info("Token blacklist initialized")
 
-	// Initialize tombstone cleanup job with default configuration (daily, 30-day retention).
-	tombstoneCleanup := jobs.NewTombstoneCleanup(secretRepo, jobs.DefaultConfig())
+	tombstoneConfig := jobs.Config{
+		RetentionPeriod: cfg.Limits.TombstoneRetentionPeriod,
+		Schedule:        cfg.Limits.TombstoneCleanupSchedule,
+		BatchSize:       cfg.Limits.TombstoneBatchSize,
+		BatchDelay:      cfg.Limits.TombstoneBatchDelay,
+		CleanupTimeout:  cfg.Limits.CleanupTimeout,
+	}
+	tombstoneCleanup := jobs.NewTombstoneCleanup(secretRepo, tombstoneConfig)
 	tombstoneCleanup.Start()
 	defer tombstoneCleanup.Stop()
 	zapLogger.Info("Tombstone cleanup job initialized")
 
-	// Initialize metrics collector.
 	metricsCollector := metrics.NewMetrics()
 
-	// Start periodic metrics logging (every 5 minutes).
 	metricsCtx, metricsCancel := context.WithCancel(context.Background())
 	defer metricsCancel()
-	go metricsCollector.StartPeriodicLogging(metricsCtx, zapLogger, 5*time.Minute)
+	go metricsCollector.StartPeriodicLogging(metricsCtx, zapLogger, cfg.Limits.MetricsLogInterval)
 	zapLogger.Info("Metrics collector initialized")
 
-	// Initialize health check service.
 	healthService := health.NewService(version)
 	healthService.RegisterChecker("postgres", health.NewPostgresChecker(pool.Pool))
 	healthService.RegisterChecker("liveness", health.NewLivenessChecker())
 	zapLogger.Info("Health check service initialized")
 
-	// Create gRPC server with chained interceptors.
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			logger.UnaryPanicRecoveryInterceptor(),
@@ -125,12 +128,10 @@ func main() {
 		),
 	)
 
-	// Initialize service handlers.
 	authService := handlers.NewAuthService(userRepo, refreshTokenRepo, jwtManager, tokenBlacklist)
-	secretsService := handlers.NewSecretsService(secretRepo)
-	syncService := handlers.NewSyncService(secretRepo, transactor)
+	secretsService := handlers.NewSecretsService(secretRepo, cfg.Limits)
+	syncService := handlers.NewSyncService(secretRepo, transactor, cfg.Limits)
 
-	// Register gRPC services.
 	pb.RegisterAuthServiceServer(grpcServer, authService)
 	pb.RegisterSecretsServiceServer(grpcServer, secretsService)
 	pb.RegisterSyncServiceServer(grpcServer, syncService)
@@ -138,7 +139,8 @@ func main() {
 	zapLogger.Info("gRPC services registered")
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	listener, err := net.Listen("tcp", addr)
+	lc := &net.ListenConfig{}
+	listener, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		zapLogger.Fatal("Failed to create listener",
 			zap.String("address", addr),
@@ -148,14 +150,12 @@ func main() {
 
 	zapLogger.Info("gRPC server listening", zap.String("address", addr))
 
-	// Start gRPC server in a goroutine.
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
 			zapLogger.Fatal("Failed to serve gRPC", zap.Error(err))
 		}
 	}()
 
-	// Start HTTP gateway server in a goroutine.
 	gatewayCtx, gatewayCancel := context.WithCancel(context.Background())
 	defer gatewayCancel()
 
@@ -177,7 +177,7 @@ func main() {
 
 	zapLogger.Info("Shutting down server...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Limits.ShutdownTimeout)
 	defer cancel()
 
 	done := make(chan struct{})
@@ -195,14 +195,13 @@ func main() {
 	}
 }
 
-// Config holds application configuration.
 type Config struct {
 	Server   ServerConfig
 	Database db.Config
 	Auth     AuthConfig
+	Limits   config.Limits
 }
 
-// ServerConfig holds server configuration.
 type ServerConfig struct {
 	Host       string
 	Port       int
@@ -210,32 +209,65 @@ type ServerConfig struct {
 	EnableCORS bool
 }
 
-// AuthConfig holds authentication configuration.
 type AuthConfig struct {
 	JWTSecret string
 }
 
-// loadConfig loads configuration from environment variables.
 func loadConfig() Config {
-	jwtSecret := getEnv("JWT_SECRET", "")
+	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" {
 		log.Fatal("JWT_SECRET environment variable is required")
 	}
 
+	serverPort := 50051
+	if port := os.Getenv("SERVER_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			serverPort = p
+		}
+	}
+
+	httpPort := 8080
+	if port := os.Getenv("HTTP_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			httpPort = p
+		}
+	}
+
+	postgresPort := 5432
+	if port := os.Getenv("POSTGRES_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			postgresPort = p
+		}
+	}
+
+	enableCORS := true
+	if cors := os.Getenv("ENABLE_CORS"); cors != "" {
+		if b, err := strconv.ParseBool(cors); err == nil {
+			enableCORS = b
+		}
+	}
+
+	getEnvDefault := func(key, defaultValue string) string {
+		if value := os.Getenv(key); value != "" {
+			return value
+		}
+		return defaultValue
+	}
+
 	return Config{
 		Server: ServerConfig{
-			Host:       getEnv("SERVER_HOST", "localhost"),
-			Port:       getEnvInt("SERVER_PORT", 50051),
-			HTTPPort:   getEnvInt("HTTP_PORT", 8080),
-			EnableCORS: getEnvBool("ENABLE_CORS", true),
+			Host:       getEnvDefault("SERVER_HOST", "localhost"),
+			Port:       serverPort,
+			HTTPPort:   httpPort,
+			EnableCORS: enableCORS,
 		},
 		Database: db.Config{
-			Host:              getEnv("POSTGRES_HOST", "localhost"),
-			Port:              getEnvInt("POSTGRES_PORT", 5432),
-			User:              getEnv("POSTGRES_USER", "keyper"),
-			Password:          getEnv("POSTGRES_PASSWORD", "keyper_dev_password"),
-			Database:          getEnv("POSTGRES_DB", "keyper"),
-			SSLMode:           getEnv("POSTGRES_SSL_MODE", "disable"),
+			Host:              getEnvDefault("POSTGRES_HOST", "localhost"),
+			Port:              postgresPort,
+			User:              getEnvDefault("POSTGRES_USER", "keyper"),
+			Password:          getEnvDefault("POSTGRES_PASSWORD", "keyper_dev_password"),
+			Database:          getEnvDefault("POSTGRES_DB", "keyper"),
+			SSLMode:           getEnvDefault("POSTGRES_SSL_MODE", "disable"),
 			MaxConns:          25,
 			MinConns:          5,
 			MaxConnLifetime:   time.Hour,
@@ -245,38 +277,11 @@ func loadConfig() Config {
 		Auth: AuthConfig{
 			JWTSecret: jwtSecret,
 		},
+		Limits: config.DefaultLimits(),
 	}
 }
 
-// getEnv retrieves an environment variable or returns a default value.
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// getEnvInt retrieves an integer environment variable or returns a default value.
-func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
-}
-
-// getEnvBool retrieves a boolean environment variable or returns a default value.
-func getEnvBool(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		if boolValue, err := strconv.ParseBool(value); err == nil {
-			return boolValue
-		}
-	}
-	return defaultValue
-}
-
-// printVersion prints version information.
+//nolint:forbidigo // printVersion outputs to stdout for CLI version flag
 func printVersion() {
 	fmt.Printf("Keyper Server\n")
 	fmt.Printf("Version:    %s\n", version)

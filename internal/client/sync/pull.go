@@ -6,15 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/grpcutil"
 	"github.com/koyif/keyper/internal/client/session"
 	"github.com/koyif/keyper/internal/client/storage"
 	"github.com/koyif/keyper/internal/crypto"
@@ -41,7 +39,7 @@ func Pull(ctx context.Context, cfg *config.Config, sess *session.Session) (*Pull
 	}
 
 	// Ensure token is valid, refresh if necessary
-	if err := sess.EnsureValidToken(cfg.Server, grpc.WithTransportCredentials(insecure.NewCredentials())); err != nil {
+	if err := sess.EnsureValidToken(cfg.Server); err != nil {
 		return nil, fmt.Errorf("failed to ensure valid token: %w", err)
 	}
 
@@ -61,22 +59,15 @@ func Pull(ctx context.Context, cfg *config.Config, sess *session.Session) (*Pull
 		lastSyncTime = timestamppb.New(t)
 	}
 
-	// Connect to server
-	conn, err := grpc.NewClient(cfg.Server, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Connect to server with authentication
+	conn, ctx, err := grpcutil.NewAuthenticatedConnection(ctx, cfg.Server, sess.GetAccessToken(), deviceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to server: %w", err)
+		return nil, err
 	}
 	defer conn.Close()
 
 	// Create SyncService client
 	client := pb.NewSyncServiceClient(conn)
-
-	// Add authentication token to context
-	md := metadata.New(map[string]string{
-		"authorization": "Bearer " + sess.GetAccessToken(),
-		"device-id":     deviceID,
-	})
-	ctx = metadata.NewOutgoingContext(ctx, md)
 
 	// Set timeout for the request
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -251,13 +242,13 @@ func resolveLastWriteWins(ctx context.Context, tx *sql.Tx, repo *storage.SQLiteR
 	useLocal := existing.UpdatedAt.After(server.UpdatedAt)
 
 	if useLocal {
-		log.Printf("Conflict resolution for %s: keeping local version (local: %s, server: %s)",
+		logrus.Debugf("Conflict resolution for %s: keeping local version (local: %s, server: %s)",
 			server.ID, existing.UpdatedAt.Format(time.RFC3339), server.UpdatedAt.Format(time.RFC3339))
 
 		return storeConflict(ctx, tx, repo, server.ID, conflictType, existing, server, true, "last-write-wins-local")
 	}
 
-	log.Printf("Conflict resolution for %s: keeping server version (local: %s, server: %s)",
+	logrus.Debugf("Conflict resolution for %s: keeping server version (local: %s, server: %s)",
 		server.ID, existing.UpdatedAt.Format(time.RFC3339), server.UpdatedAt.Format(time.RFC3339))
 
 	// Store conflict for audit trail
@@ -331,13 +322,13 @@ func mergeToLocalDB(ctx context.Context, cfg *config.Config, repo storage.Reposi
 		}
 
 		// Conflict detected
-		log.Printf("Conflict detected for secret %s: local version %d (pending), server version %d",
+		logrus.Debugf("Conflict detected for secret %s: local version %d (pending), server version %d",
 			secret.ID, existing.Version, secret.ServerVersion)
 
 		conflictType := determineConflictType(existing, secret)
 
 		if cfg.ManualConflictResolution {
-			log.Printf("Manual conflict resolution enabled for %s: storing both versions for user review", secret.ID)
+			logrus.Debugf("Manual conflict resolution enabled for %s: storing both versions for user review", secret.ID)
 
 			if err := storeConflict(ctx, tx, sqliteRepo, secret.ID, conflictType, existing, secret, false, "manual"); err != nil {
 				return fmt.Errorf("failed to handle manual conflict for %s: %w", secret.ID, err)

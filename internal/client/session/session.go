@@ -8,18 +8,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/koyif/keyper/internal/client/grpcutil"
 	pb "github.com/koyif/keyper/pkg/api/proto"
-	"google.golang.org/grpc"
 )
 
-// Session holds the current user session data
 type Session struct {
 	mu sync.RWMutex
 
-	// User information
 	UserID string `json:"user_id"`
 
-	// JWT tokens
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
@@ -27,24 +24,19 @@ type Session struct {
 	// Encryption key (never persisted to disk)
 	encryptionKey []byte
 
-	// Encryption key verifier for validating the key
 	EncryptionKeyVerifier string `json:"encryption_key_verifier"`
 
-	// Last sync timestamp
 	LastSyncAt time.Time `json:"last_sync_at,omitempty"`
 
-	// Session file path
 	filePath string
 }
 
-// New creates a new empty session
 func New(filePath string) *Session {
 	return &Session{
 		filePath: filePath,
 	}
 }
 
-// Load loads the session from disk
 func Load(filePath string) (*Session, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -64,7 +56,6 @@ func Load(filePath string) (*Session, error) {
 	return &s, nil
 }
 
-// Save saves the session to disk
 // Note: encryption key is never saved to disk
 func (s *Session) Save() error {
 	s.mu.RLock()
@@ -95,7 +86,6 @@ func (s *Session) Save() error {
 	return nil
 }
 
-// Clear clears all session data and removes the session file
 func (s *Session) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -115,7 +105,7 @@ func (s *Session) Clear() error {
 	return nil
 }
 
-// SetEncryptionKey sets the encryption key (in memory only, never persisted)
+// In memory only, never persisted
 func (s *Session) SetEncryptionKey(key []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -123,7 +113,6 @@ func (s *Session) SetEncryptionKey(key []byte) {
 	copy(s.encryptionKey, key)
 }
 
-// GetEncryptionKey returns the encryption key
 func (s *Session) GetEncryptionKey() []byte {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -136,21 +125,18 @@ func (s *Session) GetEncryptionKey() []byte {
 	return key
 }
 
-// IsAuthenticated returns true if the session has valid tokens
 func (s *Session) IsAuthenticated() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.AccessToken != "" && s.RefreshToken != ""
 }
 
-// IsExpired returns true if the access token has expired
 func (s *Session) IsExpired() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return time.Now().After(s.ExpiresAt)
 }
 
-// UpdateTokens updates the JWT tokens and expiry
 func (s *Session) UpdateTokens(accessToken, refreshToken string, expiresAt time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -159,16 +145,13 @@ func (s *Session) UpdateTokens(accessToken, refreshToken string, expiresAt time.
 	s.ExpiresAt = expiresAt
 }
 
-// UpdateLastSync updates the last sync timestamp
 func (s *Session) UpdateLastSync() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.LastSyncAt = time.Now()
 }
 
-// RefreshAccessToken refreshes the access token using the refresh token
-// Returns true if refresh was successful, false otherwise
-func (s *Session) RefreshAccessToken(serverAddr string, opts ...grpc.DialOption) error {
+func (s *Session) RefreshAccessToken(serverAddr string) error {
 	s.mu.Lock()
 	refreshToken := s.RefreshToken
 	s.mu.Unlock()
@@ -177,9 +160,9 @@ func (s *Session) RefreshAccessToken(serverAddr string, opts ...grpc.DialOption)
 		return fmt.Errorf("no refresh token available")
 	}
 
-	conn, err := grpc.NewClient(serverAddr, opts...)
+	conn, err := grpcutil.NewUnauthenticatedConnection(serverAddr)
 	if err != nil {
-		return fmt.Errorf("failed to connect to server: %w", err)
+		return err
 	}
 	defer conn.Close()
 
@@ -202,7 +185,6 @@ func (s *Session) RefreshAccessToken(serverAddr string, opts ...grpc.DialOption)
 	return nil
 }
 
-// NeedsRefresh returns true if the access token has expired or will expire soon
 // Uses a 5-minute buffer to refresh before actual expiry
 func (s *Session) NeedsRefresh() bool {
 	s.mu.RLock()
@@ -211,15 +193,13 @@ func (s *Session) NeedsRefresh() bool {
 	return time.Now().Add(5 * time.Minute).After(s.ExpiresAt)
 }
 
-// EnsureValidToken ensures the access token is valid, refreshing if necessary
-// This is a convenience method that checks if refresh is needed and performs it automatically
-func (s *Session) EnsureValidToken(serverAddr string, opts ...grpc.DialOption) error {
+func (s *Session) EnsureValidToken(serverAddr string) error {
 	if !s.IsAuthenticated() {
 		return fmt.Errorf("not authenticated")
 	}
 
 	if s.NeedsRefresh() {
-		if err := s.RefreshAccessToken(serverAddr, opts...); err != nil {
+		if err := s.RefreshAccessToken(serverAddr); err != nil {
 			return fmt.Errorf("failed to refresh token: %w", err)
 		}
 		// Save the updated session after refresh
@@ -231,9 +211,18 @@ func (s *Session) EnsureValidToken(serverAddr string, opts ...grpc.DialOption) e
 	return nil
 }
 
-// GetAccessToken returns the current access token with thread safety
 func (s *Session) GetAccessToken() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.AccessToken
+}
+
+// 30-second timeout prevents indefinite hangs on database calls.
+// Usage:
+//
+//	ctx, cancel := session.DatabaseContext()
+//	defer cancel()
+//	err := repo.SomeMethod(ctx, ...)
+func DatabaseContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 30*time.Second)
 }

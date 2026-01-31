@@ -39,12 +39,12 @@ func NewVersionCommand(getCfg func() *config.Config, version, commit, buildDate 
 
 			// Handle text format with custom layout
 			if cfg.Format == "text" {
-				fmt.Printf("Keyper CLI\n")
-				fmt.Printf("Version:    %s\n", version)
-				fmt.Printf("Commit:     %s\n", commit)
-				fmt.Printf("Build Date: %s\n", buildDate)
-				fmt.Printf("Go Version: %s\n", runtime.Version())
-				fmt.Printf("OS/Arch:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
+				fmt.Fprintf(cmd.OutOrStdout(), "Keyper CLI\n")
+				fmt.Fprintf(cmd.OutOrStdout(), "Version:    %s\n", version)
+				fmt.Fprintf(cmd.OutOrStdout(), "Commit:     %s\n", commit)
+				fmt.Fprintf(cmd.OutOrStdout(), "Build Date: %s\n", buildDate)
+				fmt.Fprintf(cmd.OutOrStdout(), "Go Version: %s\n", runtime.Version())
+				fmt.Fprintf(cmd.OutOrStdout(), "OS/Arch:    %s/%s\n", runtime.GOOS, runtime.GOARCH)
 				return nil
 			}
 
@@ -59,7 +59,7 @@ func NewVersionCommand(getCfg func() *config.Config, version, commit, buildDate 
 				return fmt.Errorf("failed to format version info: %w", err)
 			}
 
-			fmt.Print(formattedOutput)
+			fmt.Fprint(cmd.OutOrStdout(), formattedOutput)
 			return nil
 		},
 	}

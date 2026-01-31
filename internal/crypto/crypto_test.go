@@ -3,6 +3,7 @@ package crypto
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"testing"
 )
 
@@ -26,7 +27,6 @@ func TestGenerateSalt(t *testing.T) {
 				t.Errorf("GenerateSalt() length = %v, want %v", len(salt), tt.length)
 			}
 
-			// Test uniqueness
 			salt2, err := GenerateSalt(tt.length)
 			if err != nil {
 				t.Fatalf("GenerateSalt() error = %v", err)
@@ -42,25 +42,21 @@ func TestDeriveKey(t *testing.T) {
 	password := "test-master-password"
 	salt := []byte("test-salt-32-bytes-long-enough!!")
 
-	// Test key derivation
 	key := DeriveKey(password, salt)
 	if len(key) != ArgonKeyLength {
 		t.Errorf("DeriveKey() length = %v, want %v", len(key), ArgonKeyLength)
 	}
 
-	// Test deterministic output
 	key2 := DeriveKey(password, salt)
 	if !bytes.Equal(key, key2) {
 		t.Error("DeriveKey() should produce deterministic output")
 	}
 
-	// Test different password produces different key
 	key3 := DeriveKey("different-password", salt)
 	if bytes.Equal(key, key3) {
 		t.Error("DeriveKey() should produce different keys for different passwords")
 	}
 
-	// Test different salt produces different key
 	salt2 := []byte("different-salt-32-bytes-long!!!")
 	key4 := DeriveKey(password, salt2)
 	if bytes.Equal(key, key4) {
@@ -96,7 +92,6 @@ func TestHashMasterPassword(t *testing.T) {
 		t.Errorf("HashMasterPassword() length = %v, want %v", len(hash), ArgonKeyLength)
 	}
 
-	// Test deterministic
 	hash2 := HashMasterPassword(password, salt)
 	if !bytes.Equal(hash, hash2) {
 		t.Error("HashMasterPassword() should be deterministic")
@@ -149,24 +144,20 @@ func TestEncryptDecrypt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Encrypt
 			ciphertext, err := Encrypt(tt.plaintext, key)
 			if err != nil {
 				t.Fatalf("Encrypt() error = %v", err)
 			}
 
-			// Verify ciphertext is different from plaintext
 			if string(tt.plaintext) == ciphertext && len(tt.plaintext) > 0 {
 				t.Error("Encrypt() ciphertext should differ from plaintext")
 			}
 
-			// Decrypt
 			decrypted, err := Decrypt(ciphertext, key)
 			if err != nil {
 				t.Fatalf("Decrypt() error = %v", err)
 			}
 
-			// Verify decrypted matches original
 			if !bytes.Equal(decrypted, tt.plaintext) {
 				t.Errorf("Decrypt() = %v, want %v", decrypted, tt.plaintext)
 			}
@@ -179,7 +170,6 @@ func TestEncryptUniqueNonces(t *testing.T) {
 	copy(key, []byte("test-key-32-bytes-long-enough!!"))
 	plaintext := []byte("test message")
 
-	// Encrypt same plaintext multiple times
 	ciphertext1, err := Encrypt(plaintext, key)
 	if err != nil {
 		t.Fatalf("Encrypt() error = %v", err)
@@ -243,7 +233,7 @@ func TestDecryptWrongKey(t *testing.T) {
 
 	// Try to decrypt with wrong key
 	_, err = Decrypt(ciphertext, key2)
-	if err != ErrDecryptionFailed {
+	if !errors.Is(err, ErrDecryptionFailed) {
 		t.Errorf("Decrypt() with wrong key should return ErrDecryptionFailed, got %v", err)
 	}
 }
@@ -298,7 +288,7 @@ func TestValidateEncryptionKeyVerifier(t *testing.T) {
 			if tt.wantErr == nil && err != nil {
 				t.Errorf("ValidateEncryptionKeyVerifier() unexpected error = %v", err)
 			}
-			if tt.wantErr != nil && err != tt.wantErr {
+			if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
 				t.Errorf("ValidateEncryptionKeyVerifier() error = %v, want %v", err, tt.wantErr)
 			}
 		})

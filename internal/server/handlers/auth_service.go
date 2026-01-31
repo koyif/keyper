@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -14,24 +15,37 @@ import (
 	"github.com/koyif/keyper/internal/crypto"
 	"github.com/koyif/keyper/internal/server/auth"
 	"github.com/koyif/keyper/internal/server/repository"
-	"github.com/koyif/keyper/internal/server/repository/postgres"
 	pb "github.com/koyif/keyper/pkg/api/proto"
 )
 
-// AuthService implements the AuthService gRPC service.
+// UserRepository defines the interface for user data access.
+// Interfaces are defined at the point of use following Go best practices.
+type UserRepository interface {
+	CreateUser(ctx context.Context, username string, passwordHash, encryptionKeyVerifier, salt []byte) (*repository.User, error)
+	GetUserByEmail(ctx context.Context, email string) (*repository.User, error)
+	GetUserByID(ctx context.Context, id uuid.UUID) (*repository.User, error)
+	Update(ctx context.Context, user *repository.User) error
+}
+
+// RefreshTokenRepository defines the interface for refresh token management.
+type RefreshTokenRepository interface {
+	Create(ctx context.Context, userID uuid.UUID, tokenHash []byte, deviceID *string, expiresAt time.Time) (*repository.RefreshToken, error)
+	GetByTokenHash(ctx context.Context, tokenHash []byte) (*repository.RefreshToken, error)
+	DeleteByID(ctx context.Context, id uuid.UUID) error
+}
+
 type AuthService struct {
 	pb.UnimplementedAuthServiceServer
 
-	userRepo         *postgres.UserRepository
-	refreshTokenRepo *postgres.RefreshTokenRepository
+	userRepo         UserRepository
+	refreshTokenRepo RefreshTokenRepository
 	jwtManager       *auth.JWTManager
 	tokenBlacklist   *auth.TokenBlacklist
 }
 
-// NewAuthService creates a new AuthService instance.
 func NewAuthService(
-	userRepo *postgres.UserRepository,
-	refreshTokenRepo *postgres.RefreshTokenRepository,
+	userRepo UserRepository,
+	refreshTokenRepo RefreshTokenRepository,
 	jwtManager *auth.JWTManager,
 	tokenBlacklist *auth.TokenBlacklist,
 ) *AuthService {
@@ -43,41 +57,35 @@ func NewAuthService(
 	}
 }
 
-// Register creates a new user account.
 func (s *AuthService) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	// Validate input.
 	if req.Username == "" {
-		return nil, status.Error(codes.InvalidArgument, "username is required")
-	}
-	if req.MasterPassword == "" {
-		return nil, status.Error(codes.InvalidArgument, "master_password is required")
+		return nil, status.Error(codes.InvalidArgument, "username is required") //nolint:wrapcheck // gRPC status error is the correct format
 	}
 
-	// Generate salt for password hashing.
+	if req.MasterPassword == "" {
+		return nil, status.Error(codes.InvalidArgument, "master_password is required") //nolint:wrapcheck // gRPC status error is the correct format
+	}
+
 	salt, err := crypto.GenerateSalt(crypto.SaltLength)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate salt: %v", err)
 	}
 
-	// Derive password hash for authentication.
 	passwordHash := crypto.HashMasterPassword(req.MasterPassword, salt)
 
-	// Derive encryption key (never sent to server, only used for verifier).
+	// Encryption key never sent to server, only used for verifier
 	encryptionKey := crypto.DeriveKey(req.MasterPassword, salt)
 
-	// Generate encryption key verifier.
 	verifierStr, _, err := crypto.GenerateEncryptionKeyVerifier(encryptionKey)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate encryption key verifier: %v", err)
 	}
 
-	// Decode the base64 verifier for storage.
 	verifierBytes, err := base64.StdEncoding.DecodeString(verifierStr)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to decode verifier: %v", err)
 	}
 
-	// Create user in database.
 	user, err := s.userRepo.CreateUser(ctx, req.Username, passwordHash, verifierBytes, salt)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicate) {
@@ -86,13 +94,11 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 		return nil, status.Errorf(codes.Internal, "failed to create user: %v", err)
 	}
 
-	// Generate JWT tokens.
 	accessToken, refreshToken, expiresAt, err := s.jwtManager.GenerateTokenPair(user.ID, req.DeviceInfo)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate tokens: %v", err)
 	}
 
-	// Store refresh token hash in database.
 	tokenHash := []byte(auth.HashRefreshToken(refreshToken))
 	var deviceID *string
 	if req.DeviceInfo != "" {
@@ -112,9 +118,7 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 	}, nil
 }
 
-// Login authenticates a user and returns access/refresh tokens.
 func (s *AuthService) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
-	// Validate input.
 	if req.Username == "" {
 		return nil, status.Error(codes.InvalidArgument, "username is required")
 	}
@@ -122,7 +126,6 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Logi
 		return nil, status.Error(codes.InvalidArgument, "master_password is required")
 	}
 
-	// Retrieve user by username (email).
 	user, err := s.userRepo.GetUserByEmail(ctx, req.Username)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -131,18 +134,15 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Logi
 		return nil, status.Errorf(codes.Internal, "failed to retrieve user: %v", err)
 	}
 
-	// Verify password.
 	if !crypto.VerifyMasterPassword(req.MasterPassword, user.Salt, user.PasswordHash) {
 		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
 	}
 
-	// Generate JWT tokens.
 	accessToken, refreshToken, expiresAt, err := s.jwtManager.GenerateTokenPair(user.ID, req.DeviceInfo)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate tokens: %v", err)
 	}
 
-	// Store refresh token hash in database.
 	tokenHash := []byte(auth.HashRefreshToken(refreshToken))
 	var deviceID *string
 	if req.DeviceInfo != "" {
@@ -162,25 +162,20 @@ func (s *AuthService) Login(ctx context.Context, req *pb.LoginRequest) (*pb.Logi
 	}, nil
 }
 
-// RefreshToken generates a new access token using a refresh token.
 func (s *AuthService) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequest) (*pb.RefreshTokenResponse, error) {
-	// Validate input.
 	if req.RefreshToken == "" {
 		return nil, status.Error(codes.InvalidArgument, "refresh_token is required")
 	}
 
-	// Check if token is blacklisted.
 	if s.tokenBlacklist.IsBlacklisted(req.RefreshToken) {
 		return nil, status.Error(codes.Unauthenticated, "token has been revoked")
 	}
 
-	// Validate refresh token.
 	claims, err := s.jwtManager.ValidateToken(req.RefreshToken)
 	if err != nil {
 		return nil, status.Errorf(codes.Unauthenticated, "invalid refresh token: %v", err)
 	}
 
-	// Verify refresh token exists in database.
 	tokenHash := []byte(auth.HashRefreshToken(req.RefreshToken))
 	storedToken, err := s.refreshTokenRepo.GetByTokenHash(ctx, tokenHash)
 	if err != nil {
@@ -190,18 +185,15 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequ
 		return nil, status.Errorf(codes.Internal, "failed to verify refresh token: %v", err)
 	}
 
-	// Parse user ID.
 	userID, err := uuid.Parse(claims.UserID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "invalid user_id in token: %v", err)
 	}
 
-	// Verify user ID matches.
 	if storedToken.UserID != userID {
 		return nil, status.Error(codes.Unauthenticated, "token user mismatch")
 	}
 
-	// Generate new access token.
 	newAccessToken, expiresAt, err := s.jwtManager.GenerateAccessToken(userID, claims.DeviceID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate access token: %v", err)
@@ -214,22 +206,17 @@ func (s *AuthService) RefreshToken(ctx context.Context, req *pb.RefreshTokenRequ
 	}, nil
 }
 
-// Logout revokes the current refresh token.
 func (s *AuthService) Logout(ctx context.Context, req *pb.LogoutRequest) (*pb.LogoutResponse, error) {
-	// Validate input.
 	if req.RefreshToken == "" {
 		return nil, status.Error(codes.InvalidArgument, "refresh_token is required")
 	}
 
-	// Add token to blacklist (for immediate invalidation of access tokens).
 	s.tokenBlacklist.Add(req.RefreshToken, time.Now().Add(auth.RefreshTokenExpiry))
 
-	// Delete refresh token from database.
 	tokenHash := []byte(auth.HashRefreshToken(req.RefreshToken))
 	storedToken, err := s.refreshTokenRepo.GetByTokenHash(ctx, tokenHash)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			// Token already doesn't exist, consider logout successful.
 			return &pb.LogoutResponse{
 				Message: "Logged out successfully",
 			}, nil
@@ -246,9 +233,7 @@ func (s *AuthService) Logout(ctx context.Context, req *pb.LogoutRequest) (*pb.Lo
 	}, nil
 }
 
-// ChangePassword allows authenticated users to change their password.
 func (s *AuthService) ChangePassword(ctx context.Context, req *pb.ChangePasswordRequest) (*pb.ChangePasswordResponse, error) {
-	// Validate input.
 	if req.OldPassword == "" {
 		return nil, status.Error(codes.InvalidArgument, "old_password is required")
 	}
@@ -256,18 +241,11 @@ func (s *AuthService) ChangePassword(ctx context.Context, req *pb.ChangePassword
 		return nil, status.Error(codes.InvalidArgument, "new_password is required")
 	}
 
-	// Extract user ID from context (set by auth interceptor).
-	userIDStr, err := auth.GetUserIDFromContext(ctx)
+	userID, err := auth.GetUserIDAsUUID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user ID: %w", err) //nolint:wrapcheck // auth package error wrapped
 	}
 
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "invalid user_id in context: %v", err)
-	}
-
-	// Retrieve user.
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
@@ -276,34 +254,28 @@ func (s *AuthService) ChangePassword(ctx context.Context, req *pb.ChangePassword
 		return nil, status.Errorf(codes.Internal, "failed to retrieve user: %v", err)
 	}
 
-	// Verify old password.
 	if !crypto.VerifyMasterPassword(req.OldPassword, user.Salt, user.PasswordHash) {
 		return nil, status.Error(codes.Unauthenticated, "old password is incorrect")
 	}
 
-	// Generate new salt.
 	newSalt, err := crypto.GenerateSalt(crypto.SaltLength)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate salt: %v", err)
 	}
 
-	// Derive new password hash.
 	newPasswordHash := crypto.HashMasterPassword(req.NewPassword, newSalt)
 
-	// Derive new encryption key and generate verifier.
 	newEncryptionKey := crypto.DeriveKey(req.NewPassword, newSalt)
 	verifierStr, _, err := crypto.GenerateEncryptionKeyVerifier(newEncryptionKey)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate encryption key verifier: %v", err)
 	}
 
-	// Decode the base64 verifier for storage.
 	verifierBytes, err := base64.StdEncoding.DecodeString(verifierStr)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to decode verifier: %v", err)
 	}
 
-	// Update user with new password and verifier.
 	user.PasswordHash = newPasswordHash
 	user.EncryptionKeyVerifier = verifierBytes
 	user.Salt = newSalt
@@ -312,14 +284,12 @@ func (s *AuthService) ChangePassword(ctx context.Context, req *pb.ChangePassword
 		return nil, status.Errorf(codes.Internal, "failed to update password: %v", err)
 	}
 
-	// Generate new tokens (password change should invalidate old sessions).
 	deviceID := auth.GetDeviceIDFromContext(ctx)
 	accessToken, refreshToken, expiresAt, err := s.jwtManager.GenerateTokenPair(userID, deviceID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to generate tokens: %v", err)
 	}
 
-	// Store new refresh token.
 	tokenHash := []byte(auth.HashRefreshToken(refreshToken))
 	var deviceIDPtr *string
 	if deviceID != "" {

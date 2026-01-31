@@ -62,7 +62,8 @@ func setupTestServer(t *testing.T, tc *testhelpers.TestContainer) *testServer {
 	pb.RegisterAuthServiceServer(grpcServer, authService)
 
 	// Listen on random available port.
-	listener, err := net.Listen("tcp", "localhost:0")
+	lc := &net.ListenConfig{}
+	listener, err := lc.Listen(context.Background(), "tcp", "localhost:0")
 	require.NoError(t, err, "failed to create listener")
 
 	// Start server in background.
@@ -783,7 +784,7 @@ func TestAuthFlow_MultipleDevices(t *testing.T) {
 
 	t.Run("User can login from multiple devices", func(t *testing.T) {
 		devices := []string{"device-2", "device-3", "device-4"}
-		var refreshTokens []string
+		refreshTokens := make([]string, 0, len(devices))
 
 		for _, device := range devices {
 			loginReq := &pb.LoginRequest{

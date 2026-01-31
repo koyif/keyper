@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/koyif/keyper/internal/server/auth"
+	"github.com/koyif/keyper/internal/server/config"
 	"github.com/koyif/keyper/internal/server/repository"
 	"github.com/koyif/keyper/internal/server/repository/postgres"
 	pb "github.com/koyif/keyper/pkg/api/proto"
@@ -39,7 +40,7 @@ func setupSyncServiceTest(t *testing.T) *testServices {
 	secretRepo := postgres.NewSecretRepository(pool)
 	userRepo := postgres.NewUserRepository(pool)
 	transactor := postgres.NewTransactor(pool)
-	syncService := NewSyncService(secretRepo, transactor)
+	syncService := NewSyncService(secretRepo, transactor, config.DefaultLimits())
 
 	return &testServices{
 		pool:        pool,

@@ -2,8 +2,9 @@ package jobs
 
 import (
 	"context"
-	"log"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // TombstoneCleanup manages periodic cleanup of soft-deleted secrets (tombstones).
@@ -12,6 +13,9 @@ type TombstoneCleanup struct {
 	repo            SecretRepository
 	retentionPeriod time.Duration
 	schedule        time.Duration
+	batchSize       int
+	batchDelay      time.Duration
+	cleanupTimeout  time.Duration
 	stopCh          chan struct{}
 }
 
@@ -22,16 +26,22 @@ type SecretRepository interface {
 
 // Config holds configuration for the tombstone cleanup job.
 type Config struct {
-	RetentionPeriod time.Duration
-	Schedule        time.Duration
+	RetentionPeriod time.Duration // How long to keep tombstones before hard deletion
+	Schedule        time.Duration // How often to run cleanup
+	BatchSize       int           // Number of records to delete per batch
+	BatchDelay      time.Duration // Delay between batches to reduce database load
+	CleanupTimeout  time.Duration // Maximum time for entire cleanup operation
 }
 
 // DefaultConfig returns sensible default configuration.
-// Runs daily at 2 AM (24 hours interval) with 30 days retention.
+// Runs daily with 30 days retention, 1000 records per batch.
 func DefaultConfig() Config {
 	return Config{
 		RetentionPeriod: 30 * 24 * time.Hour, // 30 days
 		Schedule:        24 * time.Hour,      // Daily
+		BatchSize:       1000,                // 1000 records per batch
+		BatchDelay:      100 * time.Millisecond,
+		CleanupTimeout:  10 * time.Minute,
 	}
 }
 
@@ -41,6 +51,9 @@ func NewTombstoneCleanup(repo SecretRepository, cfg Config) *TombstoneCleanup {
 		repo:            repo,
 		retentionPeriod: cfg.RetentionPeriod,
 		schedule:        cfg.Schedule,
+		batchSize:       cfg.BatchSize,
+		batchDelay:      cfg.BatchDelay,
+		cleanupTimeout:  cfg.CleanupTimeout,
 		stopCh:          make(chan struct{}),
 	}
 }
@@ -48,15 +61,16 @@ func NewTombstoneCleanup(repo SecretRepository, cfg Config) *TombstoneCleanup {
 // Start begins the cleanup job background goroutine.
 // It runs immediately on start, then continues on the configured schedule.
 func (tc *TombstoneCleanup) Start() {
-	log.Printf("Starting tombstone cleanup job (retention: %s, schedule: %s)",
-		tc.retentionPeriod, tc.schedule)
+	zap.L().Info("Starting tombstone cleanup job",
+		zap.Duration("retention", tc.retentionPeriod),
+		zap.Duration("schedule", tc.schedule))
 
 	go tc.cleanupLoop()
 }
 
 // Stop gracefully stops the cleanup job.
 func (tc *TombstoneCleanup) Stop() {
-	log.Println("Stopping tombstone cleanup job...")
+	zap.L().Info("Stopping tombstone cleanup job")
 	close(tc.stopCh)
 }
 
@@ -73,7 +87,7 @@ func (tc *TombstoneCleanup) cleanupLoop() {
 		case <-ticker.C:
 			tc.cleanup()
 		case <-tc.stopCh:
-			log.Println("Tombstone cleanup job stopped")
+			zap.L().Info("Tombstone cleanup job stopped")
 			return
 		}
 	}
@@ -81,44 +95,43 @@ func (tc *TombstoneCleanup) cleanupLoop() {
 
 // cleanup performs the actual tombstone deletion.
 func (tc *TombstoneCleanup) cleanup() {
-	log.Println("Starting tombstone cleanup...")
+	zap.L().Info("Starting tombstone cleanup")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), tc.cleanupTimeout)
 	defer cancel()
 
 	cutoffTime := time.Now().Add(-tc.retentionPeriod)
-	batchSize := 1000 // Delete in batches to avoid long-running transactions
-
 	totalDeleted := 0
 
 	for {
-		deleted, err := tc.repo.HardDeleteTombstones(ctx, cutoffTime, batchSize)
+		deleted, err := tc.repo.HardDeleteTombstones(ctx, cutoffTime, tc.batchSize)
 		if err != nil {
-			log.Printf("Error during tombstone cleanup: %v", err)
+			zap.L().Error("Error during tombstone cleanup", zap.Error(err))
 			return
 		}
 
 		totalDeleted += deleted
 
 		// If we deleted fewer records than batch size, we're done
-		if deleted < batchSize {
+		if deleted < tc.batchSize {
 			break
 		}
 
-		// Add a small delay between batches to reduce database load
+		// Add delay between batches to reduce database load
 		select {
 		case <-ctx.Done():
-			log.Println("Tombstone cleanup cancelled due to timeout")
+			zap.L().Warn("Tombstone cleanup cancelled due to timeout")
 			return
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(tc.batchDelay):
 			// Continue to next batch
 		}
 	}
 
 	if totalDeleted > 0 {
-		log.Printf("Tombstone cleanup complete: deleted %d tombstones older than %s",
-			totalDeleted, cutoffTime.Format(time.RFC3339))
+		zap.L().Info("Tombstone cleanup complete",
+			zap.Int("deleted_count", totalDeleted),
+			zap.String("cutoff_time", cutoffTime.Format(time.RFC3339)))
 	} else {
-		log.Println("Tombstone cleanup complete: no tombstones to delete")
+		zap.L().Info("Tombstone cleanup complete: no tombstones to delete")
 	}
 }

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -51,8 +52,8 @@ func newTextAddCmd(_ func() *config.Config, getSess func() *session.Session, get
 		Long:  "Create a new text note with content and optional tags",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			var name, content, notes string
@@ -169,23 +170,21 @@ func newTextAddCmd(_ func() *config.Config, getSess func() *session.Session, get
 			}
 
 			// Store in database
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				if err := repo.Create(ctx, secret); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to store text note: %w", err)
+				}
 
-			ctx := context.Background()
-			if err := repo.Create(ctx, secret); err != nil {
-				return fmt.Errorf("failed to store text note: %w", err)
-			}
+				logrus.Debugf("Text note created: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Text note '%s' added successfully\n", name)
+				fmt.Printf("  ID: %s\n", secret.ID)
+				fmt.Printf("  Status: pending sync\n")
 
-			logrus.Debugf("Text note created: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Text note '%s' added successfully\n", name)
-			fmt.Printf("  ID: %s\n", secret.ID)
-			fmt.Printf("  Status: pending sync\n")
-
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -207,64 +206,61 @@ func newTextGetCmd(_ func() *config.Config, getSess func() *session.Session, get
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get and validate secret
+				secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_TEXT)
+				if err != nil {
+					return err
+				}
 
-			ctx := context.Background()
+				encryptionKey := sess.GetEncryptionKey()
+				if encryptionKey == nil {
+					return fmt.Errorf("encryption key not found in session")
+				}
 
-			// Get and validate secret
-			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_TEXT)
-			if err != nil {
-				return err
-			}
+				decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
+				if err != nil {
+					return fmt.Errorf("failed to decrypt secret: %w", err)
+				}
 
-			// Decrypt the data
-			decryptedData, err := decryptSecret(secret, sess)
-			if err != nil {
-				return err
-			}
+				// Unmarshal text data
+				var textData pb.TextData
+				if err := protojson.Unmarshal(decryptedData, &textData); err != nil {
+					return fmt.Errorf("failed to unmarshal text data: %w", err)
+				}
 
-			// Unmarshal text data
-			var textData pb.TextData
-			if err := protojson.Unmarshal(decryptedData, &textData); err != nil {
-				return fmt.Errorf("failed to unmarshal text data: %w", err)
-			}
+				// Display text note
+				fmt.Printf("\nText Note: %s\n", secret.Name)
+				fmt.Printf("ID: %s\n", secret.ID)
+				fmt.Println(strings.Repeat("-", 80))
+				fmt.Println(textData.Content)
+				fmt.Println(strings.Repeat("-", 80))
 
-			// Display text note
-			fmt.Printf("\nText Note: %s\n", secret.Name)
-			fmt.Printf("ID: %s\n", secret.ID)
-			fmt.Println(strings.Repeat("-", 80))
-			fmt.Println(textData.Content)
-			fmt.Println(strings.Repeat("-", 80))
-
-			// Display metadata if present
-			if secret.Metadata != "" {
-				var metadata pb.Metadata
-				if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
-					if len(metadata.Tags) > 0 {
-						fmt.Printf("Tags: %s\n", strings.Join(metadata.Tags, ", "))
-					}
-					if metadata.Notes != "" {
-						fmt.Printf("Notes: %s\n", metadata.Notes)
+				// Display metadata if present
+				if secret.Metadata != "" {
+					var metadata pb.Metadata
+					if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
+						if len(metadata.Tags) > 0 {
+							fmt.Printf("Tags: %s\n", strings.Join(metadata.Tags, ", "))
+						}
+						if metadata.Notes != "" {
+							fmt.Printf("Notes: %s\n", metadata.Notes)
+						}
 					}
 				}
-			}
 
-			fmt.Printf("\nCreated: %s\n", secret.CreatedAt.Format(time.RFC3339))
-			fmt.Printf("Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
-			fmt.Printf("Sync Status: %s\n", secret.SyncStatus)
+				fmt.Printf("\nCreated: %s\n", secret.CreatedAt.Format(time.RFC3339))
+				fmt.Printf("Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
+				fmt.Printf("Sync Status: %s\n", secret.SyncStatus)
 
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -282,67 +278,64 @@ func newTextListCmd(_ func() *config.Config, getSess func() *session.Session, ge
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				textType := pb.SecretType_SECRET_TYPE_TEXT
 
-			ctx := context.Background()
-			textType := pb.SecretType_SECRET_TYPE_TEXT
-
-			// List text notes
-			secrets, err := repo.List(ctx, storage.ListFilters{
-				Type:           &textType,
-				IncludeDeleted: showDeleted,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to list text notes: %w", err)
-			}
-
-			if len(secrets) == 0 {
-				fmt.Println("No text notes found")
-				return nil
-			}
-
-			// Display text notes
-			fmt.Printf("\nText Notes (%d):\n", len(secrets))
-			fmt.Println(strings.Repeat("-", 80))
-
-			for _, secret := range secrets {
-				status := "✓"
-				if secret.SyncStatus == storage.SyncStatusPending {
-					status = "⏳"
-				} else if secret.SyncStatus == storage.SyncStatusConflict {
-					status = "⚠"
-				}
-				if secret.IsDeleted {
-					status = "🗑"
+				// List text notes
+				secrets, err := repo.List(ctx, storage.ListFilters{
+					Type:           &textType,
+					IncludeDeleted: showDeleted,
+				})
+				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to list text notes: %w", err)
 				}
 
-				// Try to get tags from metadata for display
-				tags := ""
-				if secret.Metadata != "" {
-					var metadata pb.Metadata
-					if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
-						if len(metadata.Tags) > 0 {
-							tags = " [" + strings.Join(metadata.Tags, ", ") + "]"
+				if len(secrets) == 0 {
+					fmt.Println("No text notes found")
+					return nil
+				}
+
+				// Display text notes
+				fmt.Printf("\nText Notes (%d):\n", len(secrets))
+				fmt.Println(strings.Repeat("-", 80))
+
+				for _, secret := range secrets {
+					status := "✓"
+					if secret.SyncStatus == storage.SyncStatusPending {
+						status = "⏳"
+					} else if secret.SyncStatus == storage.SyncStatusConflict {
+						status = "⚠"
+					}
+					if secret.IsDeleted {
+						status = "🗑"
+					}
+
+					// Try to get tags from metadata for display
+					tags := ""
+					if secret.Metadata != "" {
+						var metadata pb.Metadata
+						if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
+							if len(metadata.Tags) > 0 {
+								tags = " [" + strings.Join(metadata.Tags, ", ") + "]"
+							}
 						}
 					}
+
+					fmt.Printf("%s %-36s  %s%s\n", status, secret.ID[:8]+"...", secret.Name, tags)
 				}
 
-				fmt.Printf("%s %-36s  %s%s\n", status, secret.ID[:8]+"...", secret.Name, tags)
-			}
+				fmt.Println(strings.Repeat("-", 80))
+				fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
 
-			fmt.Println(strings.Repeat("-", 80))
-			fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
-
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -360,145 +353,141 @@ func newTextUpdateCmd(getCfg func() *config.Config, getSess func() *session.Sess
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get and validate secret
+				secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_TEXT)
+				if err != nil {
+					return err
+				}
 
-			ctx := context.Background()
+				// Decrypt existing data
+				encryptionKey := sess.GetEncryptionKey()
+				if encryptionKey == nil {
+					return fmt.Errorf("encryption key not found in session")
+				}
 
-			// Get and validate secret
-			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_TEXT)
-			if err != nil {
-				return err
-			}
+				decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
+				if err != nil {
+					return fmt.Errorf("failed to decrypt text note: %w", err)
+				}
 
-			// Decrypt existing data
-			encryptionKey := sess.GetEncryptionKey()
-			if encryptionKey == nil {
-				return fmt.Errorf("encryption key not found in session")
-			}
+				var textData pb.TextData
+				if err := protojson.Unmarshal(decryptedData, &textData); err != nil {
+					return fmt.Errorf("failed to unmarshal text data: %w", err)
+				}
 
-			decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
-			if err != nil {
-				return fmt.Errorf("failed to decrypt text note: %w", err)
-			}
+				// Prompt for updates
+				newName := secret.Name
+				newContent := textData.Content
 
-			var textData pb.TextData
-			if err := protojson.Unmarshal(decryptedData, &textData); err != nil {
-				return fmt.Errorf("failed to unmarshal text data: %w", err)
-			}
+				var metadata pb.Metadata
+				if secret.Metadata != "" {
+					protojson.Unmarshal([]byte(secret.Metadata), &metadata)
+				}
+				newNotes := metadata.Notes
+				var tagsInput string
+				if len(metadata.Tags) > 0 {
+					tagsInput = strings.Join(metadata.Tags, ", ")
+				}
 
-			// Prompt for updates
-			newName := secret.Name
-			newContent := textData.Content
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewInput().
+							Title("Name").
+							Value(&newName).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("name is required")
+								}
+								return nil
+							}),
 
-			var metadata pb.Metadata
-			if secret.Metadata != "" {
-				protojson.Unmarshal([]byte(secret.Metadata), &metadata)
-			}
-			newNotes := metadata.Notes
-			var tagsInput string
-			if len(metadata.Tags) > 0 {
-				tagsInput = strings.Join(metadata.Tags, ", ")
-			}
+						huh.NewText().
+							Title("Content").
+							Value(&newContent).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("content is required")
+								}
+								return nil
+							}),
 
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewInput().
-						Title("Name").
-						Value(&newName).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("name is required")
-							}
-							return nil
-						}),
+						huh.NewInput().
+							Title("Tags").
+							Description("Comma-separated tags").
+							Value(&tagsInput),
 
-					huh.NewText().
-						Title("Content").
-						Value(&newContent).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("content is required")
-							}
-							return nil
-						}),
+						huh.NewInput().
+							Title("Notes").
+							Value(&newNotes),
+					),
+				)
 
-					huh.NewInput().
-						Title("Tags").
-						Description("Comma-separated tags").
-						Value(&tagsInput),
+				if err := form.Run(); err != nil {
+					return fmt.Errorf("operation cancelled: %w", err)
+				}
 
-					huh.NewInput().
-						Title("Notes").
-						Value(&newNotes),
-				),
-			)
+				// Update text data
+				textData.Content = newContent
 
-			if err := form.Run(); err != nil {
-				return fmt.Errorf("operation cancelled: %w", err)
-			}
+				// Marshal and encrypt
+				textJSON, err := protojson.Marshal(&textData)
+				if err != nil {
+					return fmt.Errorf("failed to marshal text data: %w", err)
+				}
 
-			// Update text data
-			textData.Content = newContent
+				encryptedData, err := crypto.Encrypt(textJSON, encryptionKey)
+				if err != nil {
+					return fmt.Errorf("failed to encrypt text note: %w", err)
+				}
 
-			// Marshal and encrypt
-			textJSON, err := protojson.Marshal(&textData)
-			if err != nil {
-				return fmt.Errorf("failed to marshal text data: %w", err)
-			}
-
-			encryptedData, err := crypto.Encrypt(textJSON, encryptionKey)
-			if err != nil {
-				return fmt.Errorf("failed to encrypt text note: %w", err)
-			}
-
-			// Update metadata
-			metadata.Notes = newNotes
-			// Parse tags
-			metadata.Tags = nil
-			if tagsInput != "" {
-				for _, tag := range strings.Split(tagsInput, ",") {
-					tag = strings.TrimSpace(tag)
-					if tag != "" {
-						metadata.Tags = append(metadata.Tags, tag)
+				// Update metadata
+				metadata.Notes = newNotes
+				// Parse tags
+				metadata.Tags = nil
+				if tagsInput != "" {
+					for _, tag := range strings.Split(tagsInput, ",") {
+						tag = strings.TrimSpace(tag)
+						if tag != "" {
+							metadata.Tags = append(metadata.Tags, tag)
+						}
 					}
 				}
-			}
 
-			metadataJSON, err := protojson.Marshal(&metadata)
-			if err != nil {
-				return fmt.Errorf("failed to marshal metadata: %w", err)
-			}
+				metadataJSON, err := protojson.Marshal(&metadata)
+				if err != nil {
+					return fmt.Errorf("failed to marshal metadata: %w", err)
+				}
 
-			// Update secret
-			secret.Name = newName
-			secret.EncryptedData = []byte(encryptedData)
-			secret.Nonce = []byte{} // Nonce is embedded in encrypted data
-			secret.Metadata = string(metadataJSON)
-			secret.Version++
-			secret.SyncStatus = storage.SyncStatusPending
-			secret.UpdatedAt = time.Now()
-			secret.LocalUpdatedAt = time.Now()
+				// Update secret
+				secret.Name = newName
+				secret.EncryptedData = []byte(encryptedData)
+				secret.Nonce = []byte{} // Nonce is embedded in encrypted data
+				secret.Metadata = string(metadataJSON)
+				secret.Version++
+				secret.SyncStatus = storage.SyncStatusPending
+				secret.UpdatedAt = time.Now()
+				secret.LocalUpdatedAt = time.Now()
 
-			if err := repo.Update(ctx, secret); err != nil {
-				return fmt.Errorf("failed to update text note: %w", err)
-			}
+				if err := repo.Update(ctx, secret); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to update text note: %w", err)
+				}
 
-			logrus.Debugf("Text note updated: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Text note '%s' updated successfully\n", newName)
-			fmt.Printf("  Status: pending sync\n")
+				logrus.Debugf("Text note updated: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Text note '%s' updated successfully\n", newName)
+				fmt.Printf("  Status: pending sync\n")
 
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -517,48 +506,44 @@ func newTextDeleteCmd(_ func() *config.Config, getSess func() *session.Session, 
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get and validate secret
+				secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_TEXT)
+				if err != nil {
+					return err
+				}
 
-			ctx := context.Background()
+				// Confirm deletion
+				confirm, err := confirmDeletion(secret.Name, "text note", noConfirm)
+				if err != nil {
+					return err
+				}
 
-			// Get and validate secret
-			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_TEXT)
-			if err != nil {
-				return err
-			}
+				if !confirm {
+					fmt.Println("Deletion cancelled")
+					return nil
+				}
 
-			// Confirm deletion
-			confirm, err := confirmDeletion(secret.Name, "text note", noConfirm)
-			if err != nil {
-				return err
-			}
+				// Delete (soft delete)
+				if err := repo.Delete(ctx, secret.ID); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to delete text note: %w", err)
+				}
 
-			if !confirm {
-				fmt.Println("Deletion cancelled")
+				logrus.Debugf("Text note deleted: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Text note '%s' deleted successfully\n", secret.Name)
+				fmt.Printf("  Status: pending sync\n")
+
 				return nil
-			}
-
-			// Delete (soft delete)
-			if err := repo.Delete(ctx, secret.ID); err != nil {
-				return fmt.Errorf("failed to delete text note: %w", err)
-			}
-
-			logrus.Debugf("Text note deleted: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Text note '%s' deleted successfully\n", secret.Name)
-			fmt.Printf("  Status: pending sync\n")
-
-			return nil
+			})
 		},
 	}
 

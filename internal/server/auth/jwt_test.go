@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -124,7 +125,7 @@ func TestJWTManager_ValidateToken_InvalidSignature(t *testing.T) {
 		t.Error("Expected validation to fail with invalid signature")
 	}
 
-	if err != ErrInvalidSignature {
+	if !errors.Is(err, ErrInvalidSignature) {
 		t.Errorf("Expected ErrInvalidSignature, got %v", err)
 	}
 }

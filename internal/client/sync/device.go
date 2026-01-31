@@ -59,7 +59,7 @@ func LoadOrCreateDeviceID(cfg *config.Config) (string, error) {
 func saveDeviceID(cfg *config.Config, deviceID string) error {
 	// Ensure config directory exists
 	if err := cfg.EnsureDirectories(); err != nil {
-		return err
+		return fmt.Errorf("failed to ensure config directory: %w", err)
 	}
 
 	// Load or create viper instance for the config file
@@ -95,7 +95,7 @@ func saveDeviceID(cfg *config.Config, deviceID string) error {
 func UpdateLastSyncAt(cfg *config.Config, timestamp string) error {
 	// Ensure config directory exists
 	if err := cfg.EnsureDirectories(); err != nil {
-		return err
+		return fmt.Errorf("failed to ensure config directory: %w", err)
 	}
 
 	// Load or create viper instance for the config file

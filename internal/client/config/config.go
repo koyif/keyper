@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,41 +10,32 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config holds all configuration for the CLI client
 type Config struct {
-	// Server is the address of the Keyper server (e.g., "localhost:50051")
 	Server string `mapstructure:"server"`
 
-	// ConfigPath is the path to the configuration file
 	ConfigPath string `mapstructure:"-"`
 
-	// Verbose enables debug logging
 	Verbose bool `mapstructure:"verbose"`
 
-	// Format specifies the output format (text, json, yaml)
 	Format string `mapstructure:"format"`
 
-	// SessionPath is the path to the session file
 	SessionPath string `mapstructure:"session_path"`
 
-	// DBPath is the path to the local SQLite database
 	DBPath string `mapstructure:"db_path"`
 
-	// DeviceID is a unique identifier for this device (UUID v4)
 	DeviceID string `mapstructure:"device_id"`
 
-	// LastSyncAt is the timestamp of the last successful sync (RFC3339 format)
 	LastSyncAt string `mapstructure:"last_sync_at"`
 
-	// ManualConflictResolution when true, requires user to manually resolve conflicts
+	// When true, requires user to manually resolve conflicts
 	// When false (default), uses last-write-wins strategy
 	ManualConflictResolution bool `mapstructure:"manual_conflict_resolution"`
 }
 
-// DefaultConfig returns a Config with default values
 func DefaultConfig() *Config {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
+		logrus.Warnf("Could not get home directory, using current dir: %v", err)
 		homeDir = "."
 	}
 
@@ -58,7 +50,6 @@ func DefaultConfig() *Config {
 	}
 }
 
-// Load loads configuration from file, environment variables, and CLI flags
 // Priority (highest to lowest): CLI flags > Environment variables > Config file > Defaults
 func Load(configPath string) (*Config, error) {
 	cfg := DefaultConfig()
@@ -72,13 +63,15 @@ func Load(configPath string) (*Config, error) {
 		cfg.ConfigPath = configPath
 	} else {
 		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			keyperDir := filepath.Join(homeDir, ".keyper")
-			v.AddConfigPath(keyperDir)
-			v.SetConfigName("config")
-			v.SetConfigType("yaml")
-			cfg.ConfigPath = filepath.Join(keyperDir, "config.yaml")
+		if err != nil {
+			logrus.Warnf("Could not get home directory, using current dir: %v", err)
+			homeDir = "."
 		}
+		keyperDir := filepath.Join(homeDir, ".keyper")
+		v.AddConfigPath(keyperDir)
+		v.SetConfigName("config")
+		v.SetConfigType("yaml")
+		cfg.ConfigPath = filepath.Join(keyperDir, "config.yaml")
 	}
 
 	v.SetEnvPrefix("KEYPER")
@@ -91,7 +84,8 @@ func Load(configPath string) (*Config, error) {
 	v.BindEnv("db_path")
 
 	if err := v.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+		var cfgNotFoundErr viper.ConfigFileNotFoundError
+		if !errors.As(err, &cfgNotFoundErr) {
 			return nil, fmt.Errorf("failed to read config file: %w", err)
 		}
 		logrus.Debug("No config file found, using defaults")
@@ -106,7 +100,6 @@ func Load(configPath string) (*Config, error) {
 	return cfg, nil
 }
 
-// EnsureDirectories ensures that all necessary directories exist
 func (c *Config) EnsureDirectories() error {
 	dirs := []string{
 		filepath.Dir(c.SessionPath),
@@ -126,7 +119,6 @@ func (c *Config) EnsureDirectories() error {
 	return nil
 }
 
-// ValidateFormat validates the output format
 func (c *Config) ValidateFormat() error {
 	switch c.Format {
 	case "text", "json", "yaml":

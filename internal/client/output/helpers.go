@@ -140,7 +140,12 @@ func FormatSecret(secret *storage.LocalSecret, decryptedData []byte, format stri
 		return "", fmt.Errorf("unsupported secret type: %v", secret.Type)
 	}
 
-	return formatter.Format(view)
+	output, err := formatter.Format(view)
+	if err != nil {
+		return "", fmt.Errorf("failed to format secret: %w", err)
+	}
+
+	return output, nil
 }
 
 // FormatSecretList formats a list of secrets for display
@@ -163,7 +168,12 @@ func FormatSecretList(secrets []*storage.LocalSecret, format string) (string, er
 		}
 	}
 
-	return formatter.FormatList(items)
+	output, err := formatter.FormatList(items)
+	if err != nil {
+		return "", fmt.Errorf("failed to format secret list: %w", err)
+	}
+
+	return output, nil
 }
 
 // FormatError formats an error message

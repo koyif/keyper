@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -53,8 +54,8 @@ func newCredentialAddCmd(_ func() *config.Config, getSess func() *session.Sessio
 		Long:  "Create a new credential with username, password, and optional metadata",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			var name, username, password, email, url, notes string
@@ -180,23 +181,21 @@ func newCredentialAddCmd(_ func() *config.Config, getSess func() *session.Sessio
 			}
 
 			// Store in database
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				if err := repo.Create(ctx, secret); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to store credential: %w", err)
+				}
 
-			ctx := context.Background()
-			if err := repo.Create(ctx, secret); err != nil {
-				return fmt.Errorf("failed to store credential: %w", err)
-			}
+				logrus.Debugf("Credential created: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Credential '%s' added successfully\n", name)
+				fmt.Printf("  ID: %s\n", secret.ID)
+				fmt.Printf("  Status: pending sync\n")
 
-			logrus.Debugf("Credential created: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Credential '%s' added successfully\n", name)
-			fmt.Printf("  ID: %s\n", secret.ID)
-			fmt.Printf("  Status: pending sync\n")
-
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -220,66 +219,63 @@ func newCredentialGetCmd(_ func() *config.Config, getSess func() *session.Sessio
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get and validate secret
+				secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_CREDENTIAL)
+				if err != nil {
+					return err
+				}
 
-			ctx := context.Background()
+				encryptionKey := sess.GetEncryptionKey()
+				if encryptionKey == nil {
+					return fmt.Errorf("encryption key not found in session")
+				}
 
-			// Get and validate secret
-			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_CREDENTIAL)
-			if err != nil {
-				return err
-			}
+				decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
+				if err != nil {
+					return fmt.Errorf("failed to decrypt secret: %w", err)
+				}
 
-			// Decrypt the data
-			decryptedData, err := decryptSecret(secret, sess)
-			if err != nil {
-				return err
-			}
+				// Unmarshal credential data
+				var credData pb.CredentialData
+				if err := protojson.Unmarshal(decryptedData, &credData); err != nil {
+					return fmt.Errorf("failed to unmarshal credential data: %w", err)
+				}
 
-			// Unmarshal credential data
-			var credData pb.CredentialData
-			if err := protojson.Unmarshal(decryptedData, &credData); err != nil {
-				return fmt.Errorf("failed to unmarshal credential data: %w", err)
-			}
+				// Display credential
+				fmt.Printf("\nCredential: %s\n", secret.Name)
+				fmt.Printf("ID: %s\n", secret.ID)
+				fmt.Printf("Username: %s\n", credData.Username)
+				fmt.Printf("Password: %s\n", credData.Password)
+				if credData.Email != "" {
+					fmt.Printf("Email: %s\n", credData.Email)
+				}
+				if credData.Url != "" {
+					fmt.Printf("URL: %s\n", credData.Url)
+				}
 
-			// Display credential
-			fmt.Printf("\nCredential: %s\n", secret.Name)
-			fmt.Printf("ID: %s\n", secret.ID)
-			fmt.Printf("Username: %s\n", credData.Username)
-			fmt.Printf("Password: %s\n", credData.Password)
-			if credData.Email != "" {
-				fmt.Printf("Email: %s\n", credData.Email)
-			}
-			if credData.Url != "" {
-				fmt.Printf("URL: %s\n", credData.Url)
-			}
-
-			// Display metadata if present
-			if secret.Metadata != "" {
-				var metadata pb.Metadata
-				if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
-					if metadata.Notes != "" {
-						fmt.Printf("Notes: %s\n", metadata.Notes)
+				// Display metadata if present
+				if secret.Metadata != "" {
+					var metadata pb.Metadata
+					if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
+						if metadata.Notes != "" {
+							fmt.Printf("Notes: %s\n", metadata.Notes)
+						}
 					}
 				}
-			}
 
-			fmt.Printf("\nCreated: %s\n", secret.CreatedAt.Format(time.RFC3339))
-			fmt.Printf("Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
-			fmt.Printf("Sync Status: %s\n", secret.SyncStatus)
+				fmt.Printf("\nCreated: %s\n", secret.CreatedAt.Format(time.RFC3339))
+				fmt.Printf("Updated: %s\n", secret.UpdatedAt.Format(time.RFC3339))
+				fmt.Printf("Sync Status: %s\n", secret.SyncStatus)
 
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -297,69 +293,66 @@ func newCredentialListCmd(_ func() *config.Config, getSess func() *session.Sessi
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				credType := pb.SecretType_SECRET_TYPE_CREDENTIAL
 
-			ctx := context.Background()
-			credType := pb.SecretType_SECRET_TYPE_CREDENTIAL
-
-			// List credentials
-			secrets, err := repo.List(ctx, storage.ListFilters{
-				Type:           &credType,
-				IncludeDeleted: showDeleted,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to list credentials: %w", err)
-			}
-
-			if len(secrets) == 0 {
-				fmt.Println("No credentials found")
-				return nil
-			}
-
-			// Display credentials
-			fmt.Printf("\nCredentials (%d):\n", len(secrets))
-			fmt.Println(strings.Repeat("-", 80))
-
-			for _, secret := range secrets {
-				status := "✓"
-				if secret.SyncStatus == storage.SyncStatusPending {
-					status = "⏳"
-				} else if secret.SyncStatus == storage.SyncStatusConflict {
-					status = "⚠"
-				}
-				if secret.IsDeleted {
-					status = "🗑"
-				}
-
-				// Try to get URL from metadata for display
-				url := ""
-				if secret.Metadata != "" {
-					var metadata pb.Metadata
-					if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
-						url = metadata.Url
+				// List credentials
+				secrets, err := repo.List(ctx, storage.ListFilters{
+					Type:           &credType,
+					IncludeDeleted: showDeleted,
+				})
+				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
 					}
+					return fmt.Errorf("failed to list credentials: %w", err)
 				}
 
-				fmt.Printf("%s %-36s  %s", status, secret.ID[:8]+"...", secret.Name)
-				if url != "" {
-					fmt.Printf("  (%s)", url)
+				if len(secrets) == 0 {
+					fmt.Println("No credentials found")
+					return nil
 				}
-				fmt.Println()
-			}
 
-			fmt.Println(strings.Repeat("-", 80))
-			fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
+				// Display credentials
+				fmt.Printf("\nCredentials (%d):\n", len(secrets))
+				fmt.Println(strings.Repeat("-", 80))
 
-			return nil
+				for _, secret := range secrets {
+					status := "✓"
+					if secret.SyncStatus == storage.SyncStatusPending {
+						status = "⏳"
+					} else if secret.SyncStatus == storage.SyncStatusConflict {
+						status = "⚠"
+					}
+					if secret.IsDeleted {
+						status = "🗑"
+					}
+
+					// Try to get URL from metadata for display
+					url := ""
+					if secret.Metadata != "" {
+						var metadata pb.Metadata
+						if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
+							url = metadata.Url
+						}
+					}
+
+					fmt.Printf("%s %-36s  %s", status, secret.ID[:8]+"...", secret.Name)
+					if url != "" {
+						fmt.Printf("  (%s)", url)
+					}
+					fmt.Println()
+				}
+
+				fmt.Println(strings.Repeat("-", 80))
+				fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
+
+				return nil
+			})
 		},
 	}
 
@@ -377,145 +370,141 @@ func newCredentialUpdateCmd(getCfg func() *config.Config, getSess func() *sessio
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get and validate secret
+				secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_CREDENTIAL)
+				if err != nil {
+					return err
+				}
 
-			ctx := context.Background()
+				// Decrypt existing data
+				encryptionKey := sess.GetEncryptionKey()
+				if encryptionKey == nil {
+					return fmt.Errorf("encryption key not found in session")
+				}
 
-			// Get and validate secret
-			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_CREDENTIAL)
-			if err != nil {
-				return err
-			}
+				decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
+				if err != nil {
+					return fmt.Errorf("failed to decrypt credential: %w", err)
+				}
 
-			// Decrypt existing data
-			encryptionKey := sess.GetEncryptionKey()
-			if encryptionKey == nil {
-				return fmt.Errorf("encryption key not found in session")
-			}
+				var credData pb.CredentialData
+				if err := protojson.Unmarshal(decryptedData, &credData); err != nil {
+					return fmt.Errorf("failed to unmarshal credential data: %w", err)
+				}
 
-			decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
-			if err != nil {
-				return fmt.Errorf("failed to decrypt credential: %w", err)
-			}
+				// Prompt for updates
+				newName := secret.Name
+				newUsername := credData.Username
+				newPassword := credData.Password
+				newEmail := credData.Email
+				newUrl := credData.Url
 
-			var credData pb.CredentialData
-			if err := protojson.Unmarshal(decryptedData, &credData); err != nil {
-				return fmt.Errorf("failed to unmarshal credential data: %w", err)
-			}
+				var metadata pb.Metadata
+				if secret.Metadata != "" {
+					protojson.Unmarshal([]byte(secret.Metadata), &metadata)
+				}
+				newNotes := metadata.Notes
 
-			// Prompt for updates
-			newName := secret.Name
-			newUsername := credData.Username
-			newPassword := credData.Password
-			newEmail := credData.Email
-			newUrl := credData.Url
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewInput().
+							Title("Name").
+							Value(&newName).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("name is required")
+								}
+								return nil
+							}),
 
-			var metadata pb.Metadata
-			if secret.Metadata != "" {
-				protojson.Unmarshal([]byte(secret.Metadata), &metadata)
-			}
-			newNotes := metadata.Notes
+						huh.NewInput().
+							Title("Username").
+							Value(&newUsername).
+							Validate(func(s string) error {
+								if len(s) == 0 {
+									return fmt.Errorf("username is required")
+								}
+								return nil
+							}),
 
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewInput().
-						Title("Name").
-						Value(&newName).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("name is required")
-							}
-							return nil
-						}),
+						huh.NewInput().
+							Title("Password").
+							Value(&newPassword).
+							EchoMode(huh.EchoModePassword),
 
-					huh.NewInput().
-						Title("Username").
-						Value(&newUsername).
-						Validate(func(s string) error {
-							if len(s) == 0 {
-								return fmt.Errorf("username is required")
-							}
-							return nil
-						}),
+						huh.NewInput().
+							Title("Email").
+							Value(&newEmail),
 
-					huh.NewInput().
-						Title("Password").
-						Value(&newPassword).
-						EchoMode(huh.EchoModePassword),
+						huh.NewInput().
+							Title("URL").
+							Value(&newUrl),
 
-					huh.NewInput().
-						Title("Email").
-						Value(&newEmail),
+						huh.NewInput().
+							Title("Notes").
+							Value(&newNotes),
+					),
+				)
 
-					huh.NewInput().
-						Title("URL").
-						Value(&newUrl),
+				if err := form.Run(); err != nil {
+					return fmt.Errorf("operation cancelled: %w", err)
+				}
 
-					huh.NewInput().
-						Title("Notes").
-						Value(&newNotes),
-				),
-			)
+				// Update credential data
+				credData.Username = newUsername
+				credData.Password = newPassword
+				credData.Email = newEmail
+				credData.Url = newUrl
 
-			if err := form.Run(); err != nil {
-				return fmt.Errorf("operation cancelled: %w", err)
-			}
+				// Marshal and encrypt
+				credJSON, err := protojson.Marshal(&credData)
+				if err != nil {
+					return fmt.Errorf("failed to marshal credential data: %w", err)
+				}
 
-			// Update credential data
-			credData.Username = newUsername
-			credData.Password = newPassword
-			credData.Email = newEmail
-			credData.Url = newUrl
+				encryptedData, err := crypto.Encrypt(credJSON, encryptionKey)
+				if err != nil {
+					return fmt.Errorf("failed to encrypt credential: %w", err)
+				}
 
-			// Marshal and encrypt
-			credJSON, err := protojson.Marshal(&credData)
-			if err != nil {
-				return fmt.Errorf("failed to marshal credential data: %w", err)
-			}
+				// Update metadata
+				metadata.Notes = newNotes
+				metadata.Url = newUrl
+				metadataJSON, err := protojson.Marshal(&metadata)
+				if err != nil {
+					return fmt.Errorf("failed to marshal metadata: %w", err)
+				}
 
-			encryptedData, err := crypto.Encrypt(credJSON, encryptionKey)
-			if err != nil {
-				return fmt.Errorf("failed to encrypt credential: %w", err)
-			}
+				// Update secret
+				secret.Name = newName
+				secret.EncryptedData = []byte(encryptedData)
+				secret.Nonce = []byte{} // Nonce is embedded in encrypted data
+				secret.Metadata = string(metadataJSON)
+				secret.Version++
+				secret.SyncStatus = storage.SyncStatusPending
+				secret.UpdatedAt = time.Now()
+				secret.LocalUpdatedAt = time.Now()
 
-			// Update metadata
-			metadata.Notes = newNotes
-			metadata.Url = newUrl
-			metadataJSON, err := protojson.Marshal(&metadata)
-			if err != nil {
-				return fmt.Errorf("failed to marshal metadata: %w", err)
-			}
+				if err := repo.Update(ctx, secret); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to update credential: %w", err)
+				}
 
-			// Update secret
-			secret.Name = newName
-			secret.EncryptedData = []byte(encryptedData)
-			secret.Nonce = []byte{} // Nonce is embedded in encrypted data
-			secret.Metadata = string(metadataJSON)
-			secret.Version++
-			secret.SyncStatus = storage.SyncStatusPending
-			secret.UpdatedAt = time.Now()
-			secret.LocalUpdatedAt = time.Now()
+				logrus.Debugf("Credential updated: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Credential '%s' updated successfully\n", newName)
+				fmt.Printf("  Status: pending sync\n")
 
-			if err := repo.Update(ctx, secret); err != nil {
-				return fmt.Errorf("failed to update credential: %w", err)
-			}
-
-			logrus.Debugf("Credential updated: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Credential '%s' updated successfully\n", newName)
-			fmt.Printf("  Status: pending sync\n")
-
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -534,48 +523,44 @@ func newCredentialDeleteCmd(_ func() *config.Config, getSess func() *session.Ses
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get and validate secret
+				secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_CREDENTIAL)
+				if err != nil {
+					return err
+				}
 
-			ctx := context.Background()
+				// Confirm deletion
+				confirm, err := confirmDeletion(secret.Name, "credential", noConfirm)
+				if err != nil {
+					return err
+				}
 
-			// Get and validate secret
-			secret, err := getSecret(ctx, repo, identifier, pb.SecretType_SECRET_TYPE_CREDENTIAL)
-			if err != nil {
-				return err
-			}
+				if !confirm {
+					fmt.Println("Deletion cancelled")
+					return nil
+				}
 
-			// Confirm deletion
-			confirm, err := confirmDeletion(secret.Name, "credential", noConfirm)
-			if err != nil {
-				return err
-			}
+				// Delete (soft delete)
+				if err := repo.Delete(ctx, secret.ID); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to delete credential: %w", err)
+				}
 
-			if !confirm {
-				fmt.Println("Deletion cancelled")
+				logrus.Debugf("Credential deleted: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Credential '%s' deleted successfully\n", secret.Name)
+				fmt.Printf("  Status: pending sync\n")
+
 				return nil
-			}
-
-			// Delete (soft delete)
-			if err := repo.Delete(ctx, secret.ID); err != nil {
-				return fmt.Errorf("failed to delete credential: %w", err)
-			}
-
-			logrus.Debugf("Credential deleted: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Credential '%s' deleted successfully\n", secret.Name)
-			fmt.Printf("  Status: pending sync\n")
-
-			return nil
+			})
 		},
 	}
 

@@ -12,47 +12,33 @@ import (
 )
 
 const (
-	// AccessTokenExpiry is the expiration duration for access tokens (15 minutes).
-	AccessTokenExpiry = 15 * time.Minute
-
-	// RefreshTokenExpiry is the expiration duration for refresh tokens (7 days).
+	AccessTokenExpiry  = 15 * time.Minute
 	RefreshTokenExpiry = 7 * 24 * time.Hour
-
-	// TokenIssuer is the issuer claim for JWT tokens.
-	TokenIssuer = "keyper"
+	TokenIssuer        = "keyper"
 )
 
 var (
-	// ErrInvalidToken is returned when a token is invalid or malformed.
-	ErrInvalidToken = errors.New("invalid token")
-
-	// ErrExpiredToken is returned when a token has expired.
-	ErrExpiredToken = errors.New("token has expired")
-
-	// ErrInvalidSignature is returned when token signature validation fails.
+	ErrInvalidToken     = errors.New("invalid token")
+	ErrExpiredToken     = errors.New("token has expired")
 	ErrInvalidSignature = errors.New("invalid token signature")
 )
 
-// CustomClaims represents JWT claims for Keyper authentication.
 type CustomClaims struct {
 	UserID   string `json:"user_id"`
 	DeviceID string `json:"device_id,omitempty"`
 	jwt.RegisteredClaims
 }
 
-// JWTManager handles JWT token generation and validation.
 type JWTManager struct {
 	secretKey []byte
 }
 
-// NewJWTManager creates a new JWT manager with the provided secret key.
 func NewJWTManager(secretKey string) *JWTManager {
 	return &JWTManager{
 		secretKey: []byte(secretKey),
 	}
 }
 
-// GenerateAccessToken generates a new access token for a user.
 func (m *JWTManager) GenerateAccessToken(userID uuid.UUID, deviceID string) (string, time.Time, error) {
 	expiresAt := time.Now().Add(AccessTokenExpiry)
 
@@ -77,7 +63,6 @@ func (m *JWTManager) GenerateAccessToken(userID uuid.UUID, deviceID string) (str
 	return tokenString, expiresAt, nil
 }
 
-// GenerateRefreshToken generates a new refresh token for a user.
 func (m *JWTManager) GenerateRefreshToken(userID uuid.UUID, deviceID string) (string, time.Time, error) {
 	expiresAt := time.Now().Add(RefreshTokenExpiry)
 
@@ -103,7 +88,6 @@ func (m *JWTManager) GenerateRefreshToken(userID uuid.UUID, deviceID string) (st
 	return tokenString, expiresAt, nil
 }
 
-// GenerateTokenPair generates both access and refresh tokens for a user.
 func (m *JWTManager) GenerateTokenPair(userID uuid.UUID, deviceID string) (accessToken, refreshToken string, expiresAt time.Time, err error) {
 	accessToken, expiresAt, err = m.GenerateAccessToken(userID, deviceID)
 	if err != nil {
@@ -118,7 +102,6 @@ func (m *JWTManager) GenerateTokenPair(userID uuid.UUID, deviceID string) (acces
 	return accessToken, refreshToken, expiresAt, nil
 }
 
-// ValidateToken validates a JWT token and returns the claims.
 func (m *JWTManager) ValidateToken(tokenString string) (*CustomClaims, error) {
 	token, err := jwt.ParseWithClaims(
 		tokenString,
@@ -146,7 +129,7 @@ func (m *JWTManager) ValidateToken(tokenString string) (*CustomClaims, error) {
 		case errors.Is(err, jwt.ErrTokenNotValidYet):
 			return nil, fmt.Errorf("%w: token not valid yet", ErrInvalidToken)
 		default:
-			return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidToken, err)
 		}
 	}
 
@@ -158,7 +141,6 @@ func (m *JWTManager) ValidateToken(tokenString string) (*CustomClaims, error) {
 	return claims, nil
 }
 
-// ExtractUserID extracts the user ID from a validated token.
 func (m *JWTManager) ExtractUserID(tokenString string) (uuid.UUID, error) {
 	claims, err := m.ValidateToken(tokenString)
 	if err != nil {
@@ -173,7 +155,6 @@ func (m *JWTManager) ExtractUserID(tokenString string) (uuid.UUID, error) {
 	return userID, nil
 }
 
-// HashRefreshToken creates a SHA-256 hash of a refresh token for storage.
 func HashRefreshToken(token string) string {
 	hash := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(hash[:])

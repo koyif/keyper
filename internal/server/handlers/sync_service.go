@@ -6,66 +6,65 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
+	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/koyif/keyper/internal/server/auth"
+	"github.com/koyif/keyper/internal/server/config"
 	"github.com/koyif/keyper/internal/server/repository"
-	"github.com/koyif/keyper/internal/server/repository/postgres"
 	pb "github.com/koyif/keyper/pkg/api/proto"
 )
 
-// SyncService implements the SyncService gRPC service.
+// SyncSecretRepository defines the interface for secret data access in sync operations.
+// Interfaces are defined at the point of use following Go best practices.
+type SyncSecretRepository interface {
+	Create(ctx context.Context, secret *repository.Secret) (*repository.Secret, error)
+	Get(ctx context.Context, id uuid.UUID) (*repository.Secret, error)
+	Update(ctx context.Context, secret *repository.Secret) (*repository.Secret, error)
+	Delete(ctx context.Context, id uuid.UUID, version int64) error
+	ListModifiedSince(ctx context.Context, userID uuid.UUID, since time.Time, limit int) ([]*repository.Secret, error)
+	CountByUser(ctx context.Context, userID uuid.UUID) (int32, error)
+}
+
+// Transactor defines the interface for transaction management.
+type Transactor interface {
+	WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
 type SyncService struct {
 	pb.UnimplementedSyncServiceServer
 
-	secretRepo *postgres.SecretRepository
-	transactor *postgres.Transactor
+	secretRepo SyncSecretRepository
+	transactor Transactor
+	limits     config.Limits
 }
 
-// NewSyncService creates a new SyncService instance.
-func NewSyncService(secretRepo *postgres.SecretRepository, transactor *postgres.Transactor) *SyncService {
+func NewSyncService(secretRepo SyncSecretRepository, transactor Transactor, limits config.Limits) *SyncService {
 	return &SyncService{
 		secretRepo: secretRepo,
 		transactor: transactor,
+		limits:     limits,
 	}
 }
 
-// getUserID extracts and validates user ID from context.
-func (s *SyncService) getUserID(ctx context.Context) (uuid.UUID, error) {
-	userIDStr, err := auth.GetUserIDFromContext(ctx)
-	if err != nil {
-		return uuid.Nil, err
-	}
-
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		return uuid.Nil, status.Errorf(codes.Internal, "invalid user_id in context: %v", err)
-	}
-
-	return userID, nil
-}
-
-// decodeEncryptedData decodes base64 encrypted data and extracts nonce and ciphertext.
-// The encrypted data format is: nonce (12 bytes) + ciphertext.
-func decodeEncryptedData(encryptedDataB64 string) (nonce, ciphertext []byte, err error) {
+func decodeEncryptedData(encryptedDataB64 string, nonceSize int) (nonce, ciphertext []byte, err error) {
 	encryptedBytes, err := base64.StdEncoding.DecodeString(encryptedDataB64)
 	if err != nil {
 		return nil, nil, status.Errorf(codes.InvalidArgument, "invalid base64 encrypted_data: %v", err)
 	}
 
-	if len(encryptedBytes) < 12 {
+	if len(encryptedBytes) < nonceSize {
 		return nil, nil, status.Error(codes.InvalidArgument, "encrypted_data too short (must include nonce)")
 	}
 
-	return encryptedBytes[:12], encryptedBytes[12:], nil
+	return encryptedBytes[:nonceSize], encryptedBytes[nonceSize:], nil
 }
 
-// serializeMetadata serializes metadata to JSON bytes.
 func serializeMetadata(metadata *pb.Metadata) ([]byte, error) {
 	if metadata == nil {
 		return nil, nil
@@ -79,49 +78,47 @@ func serializeMetadata(metadata *pb.Metadata) ([]byte, error) {
 	return metadataJSON, nil
 }
 
-// Pull retrieves changes from the server since last sync.
 func (s *SyncService) Pull(ctx context.Context, req *pb.PullRequest) (*pb.PullResponse, error) {
-	// Extract user ID from context (set by auth interceptor).
-	userID, err := s.getUserID(ctx)
+	userID, err := auth.GetUserIDAsUUID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user ID: %w", err) //nolint:wrapcheck // auth package error wrapped
 	}
 
-	// Extract device ID for logging.
 	deviceID := auth.GetDeviceIDFromContext(ctx)
-	log.Printf("[SyncService.Pull] user_id=%s device_id=%s last_sync_time=%v", userID, deviceID, req.LastSyncTime)
+	zap.L().Debug("Pull sync request",
+		zap.String("user_id", userID.String()),
+		zap.String("device_id", deviceID),
+		zap.Time("last_sync_time", req.LastSyncTime.AsTime()))
 
-	// Get last sync time from request.
 	lastSyncTime := req.LastSyncTime.AsTime()
 
-	// Retrieve all secrets modified since last sync (includes deleted).
-	// Use a reasonable limit to prevent overwhelming responses.
-	const maxSecrets = 1000
-	modifiedSecrets, err := s.secretRepo.ListModifiedSince(ctx, userID, lastSyncTime, maxSecrets)
+	modifiedSecrets, err := s.secretRepo.ListModifiedSince(ctx, userID, lastSyncTime, s.limits.MaxSyncSecrets)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to retrieve modified secrets: %v", err)
 	}
 
-	// Separate deleted secrets from active secrets.
 	var secrets []*pb.Secret
 	var deletedSecretIDs []string
 
 	for _, secret := range modifiedSecrets {
 		if secret.IsDeleted {
-			// Add to tombstone list.
 			deletedSecretIDs = append(deletedSecretIDs, secret.ID.String())
 		} else {
-			// Convert active secret to proto.
 			pbSecret, err := convertSecretToProto(secret)
 			if err != nil {
-				log.Printf("[SyncService.Pull] failed to convert secret %s: %v", secret.ID, err)
+				zap.L().Error("Failed to convert secret",
+					zap.String("secret_id", secret.ID.String()),
+					zap.Error(err))
 				return nil, status.Errorf(codes.Internal, "failed to convert secret: %v", err)
 			}
 			secrets = append(secrets, pbSecret)
 		}
 	}
 
-	log.Printf("[SyncService.Pull] returning %d secrets, %d deleted for user %s", len(secrets), len(deletedSecretIDs), userID)
+	zap.L().Debug("Pull sync response",
+		zap.Int("secrets_count", len(secrets)),
+		zap.Int("deleted_count", len(deletedSecretIDs)),
+		zap.String("user_id", userID.String()))
 
 	return &pb.PullResponse{
 		Secrets:          secrets,
@@ -130,150 +127,24 @@ func (s *SyncService) Pull(ctx context.Context, req *pb.PullRequest) (*pb.PullRe
 	}, nil
 }
 
-// Push sends local changes to the server.
 func (s *SyncService) Push(ctx context.Context, req *pb.PushRequest) (*pb.PushResponse, error) {
-	// Extract user ID from context.
-	userID, err := s.getUserID(ctx)
+	userID, err := auth.GetUserIDAsUUID(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get user ID: %w", err) //nolint:wrapcheck // auth package error wrapped
 	}
 
-	// Extract device ID for logging.
 	deviceID := auth.GetDeviceIDFromContext(ctx)
-	log.Printf("[SyncService.Push] user_id=%s device_id=%s pushing %d secrets, %d deletes",
-		userID, deviceID, len(req.Secrets), len(req.DeletedSecretIds))
+	zap.L().Debug("Push sync request",
+		zap.String("user_id", userID.String()),
+		zap.String("device_id", deviceID),
+		zap.Int("secrets_count", len(req.Secrets)),
+		zap.Int("deletes_count", len(req.DeletedSecretIds)))
 
-	// Track accepted IDs and conflicts.
 	var acceptedIDs []string
 	var conflicts []*pb.Conflict
 
-	// Process all changes within a transaction for atomicity.
 	err = s.transactor.WithTransaction(ctx, func(txCtx context.Context) error {
-		// Process secret updates/creates.
-		for _, pbSecret := range req.Secrets {
-			secretID, err := uuid.Parse(pbSecret.Id)
-			if err != nil {
-				// Skip invalid IDs but continue processing.
-				log.Printf("[SyncService.Push] invalid secret_id: %s", pbSecret.Id)
-				continue
-			}
-
-			// Check if secret exists on server.
-			existingSecret, err := s.secretRepo.Get(txCtx, secretID)
-			if err != nil && !errors.Is(err, repository.ErrNotFound) {
-				return fmt.Errorf("failed to check existing secret: %w", err)
-			}
-
-			// Secret doesn't exist - this is a create operation.
-			if errors.Is(err, repository.ErrNotFound) {
-				created, createErr := s.createSecret(txCtx, userID, pbSecret)
-				if createErr != nil {
-					return createErr
-				}
-				acceptedIDs = append(acceptedIDs, created.ID.String())
-				log.Printf("[SyncService.Push] created secret %s version %d", created.ID, created.Version)
-				continue
-			}
-
-			// Secret exists - check for version conflict (last-write-wins).
-			if existingSecret.Version != pbSecret.Version {
-				// Version mismatch - reject with conflict.
-				serverVersion, convErr := convertSecretToProto(existingSecret)
-				if convErr != nil {
-					log.Printf("[SyncService.Push] failed to convert server secret for conflict: %v", convErr)
-				}
-
-				clientVersion := pbSecret
-				conflicts = append(conflicts, &pb.Conflict{
-					SecretId:      pbSecret.Id,
-					Type:          pb.ConflictType_CONFLICT_TYPE_VERSION_MISMATCH,
-					ServerVersion: serverVersion,
-					ClientVersion: clientVersion,
-					Description:   fmt.Sprintf("version mismatch: client has v%d, server has v%d", pbSecret.Version, existingSecret.Version),
-				})
-				log.Printf("[SyncService.Push] conflict detected for secret %s: client v%d, server v%d",
-					secretID, pbSecret.Version, existingSecret.Version)
-				continue
-			}
-
-			// Versions match - accept update.
-			updated, updateErr := s.updateSecret(txCtx, existingSecret, pbSecret)
-			if updateErr != nil {
-				if errors.Is(updateErr, repository.ErrVersionConflict) {
-					// Concurrent modification - add to conflicts.
-					serverVersion, convErr := convertSecretToProto(existingSecret)
-					if convErr != nil {
-						log.Printf("[SyncService.Push] failed to convert server secret for conflict: %v", convErr)
-					}
-
-					conflicts = append(conflicts, &pb.Conflict{
-						SecretId:      pbSecret.Id,
-						Type:          pb.ConflictType_CONFLICT_TYPE_MODIFIED_MODIFIED,
-						ServerVersion: serverVersion,
-						ClientVersion: pbSecret,
-						Description:   "concurrent modification detected",
-					})
-					continue
-				}
-				return updateErr
-			}
-
-			acceptedIDs = append(acceptedIDs, updated.ID.String())
-			log.Printf("[SyncService.Push] updated secret %s to version %d", updated.ID, updated.Version)
-		}
-
-		// Process deletions.
-		for _, secretIDStr := range req.DeletedSecretIds {
-			secretID, err := uuid.Parse(secretIDStr)
-			if err != nil {
-				log.Printf("[SyncService.Push] invalid deleted_secret_id: %s", secretIDStr)
-				continue
-			}
-
-			// Get current version for optimistic locking.
-			existingSecret, err := s.secretRepo.Get(txCtx, secretID)
-			if err != nil {
-				if errors.Is(err, repository.ErrNotFound) {
-					// Already deleted - consider this successful.
-					acceptedIDs = append(acceptedIDs, secretIDStr)
-					log.Printf("[SyncService.Push] secret %s already deleted", secretID)
-					continue
-				}
-				return fmt.Errorf("failed to check secret for deletion: %w", err)
-			}
-
-			// Verify ownership.
-			if existingSecret.UserID != userID {
-				log.Printf("[SyncService.Push] permission denied: user %s tried to delete secret %s owned by %s",
-					userID, secretID, existingSecret.UserID)
-				continue
-			}
-
-			// Perform soft delete with optimistic locking.
-			if err := s.secretRepo.Delete(txCtx, secretID, existingSecret.Version); err != nil {
-				if errors.Is(err, repository.ErrVersionConflict) {
-					// Concurrent modification - add to conflicts.
-					serverVersion, convErr := convertSecretToProto(existingSecret)
-					if convErr != nil {
-						log.Printf("[SyncService.Push] failed to convert server secret for conflict: %v", convErr)
-					}
-
-					conflicts = append(conflicts, &pb.Conflict{
-						SecretId:      secretIDStr,
-						Type:          pb.ConflictType_CONFLICT_TYPE_DELETED_MODIFIED,
-						ServerVersion: serverVersion,
-						Description:   "secret was modified on server while client attempted deletion",
-					})
-					continue
-				}
-				return fmt.Errorf("failed to delete secret: %w", err)
-			}
-
-			acceptedIDs = append(acceptedIDs, secretIDStr)
-			log.Printf("[SyncService.Push] deleted secret %s", secretID)
-		}
-
-		return nil
+		return s.executeOperations(txCtx, userID, req, &acceptedIDs, &conflicts)
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to push changes: %v", err)
@@ -284,7 +155,9 @@ func (s *SyncService) Push(ctx context.Context, req *pb.PushRequest) (*pb.PushRe
 		message = fmt.Sprintf("Pushed %d changes with %d conflicts", len(acceptedIDs), len(conflicts))
 	}
 
-	log.Printf("[SyncService.Push] completed: %d accepted, %d conflicts", len(acceptedIDs), len(conflicts))
+	zap.L().Debug("Push sync completed",
+		zap.Int("accepted_count", len(acceptedIDs)),
+		zap.Int("conflicts_count", len(conflicts)))
 
 	return &pb.PushResponse{
 		SyncTime:          timestamppb.Now(),
@@ -294,99 +167,115 @@ func (s *SyncService) Push(ctx context.Context, req *pb.PushRequest) (*pb.PushRe
 	}, nil
 }
 
-// GetSyncStatus retrieves current sync status.
-func (s *SyncService) GetSyncStatus(ctx context.Context, _ *pb.GetSyncStatusRequest) (*pb.GetSyncStatusResponse, error) {
-	// Extract user ID from context.
-	userID, err := s.getUserID(ctx)
-	if err != nil {
-		return nil, err
+func (s *SyncService) executeOperations(
+	ctx context.Context,
+	userID uuid.UUID,
+	req *pb.PushRequest,
+	acceptedIDs *[]string,
+	conflicts *[]*pb.Conflict,
+) error {
+	for _, pbSecret := range req.Secrets {
+		result, err := s.processSecret(ctx, userID, pbSecret)
+		if err != nil {
+			return err
+		}
+		if result != nil {
+			if result.Accepted {
+				*acceptedIDs = append(*acceptedIDs, result.SecretID)
+			} else if result.Conflict != nil {
+				*conflicts = append(*conflicts, result.Conflict)
+			}
+		}
 	}
 
-	// Extract device ID for logging.
-	deviceID := auth.GetDeviceIDFromContext(ctx)
-	log.Printf("[SyncService.GetSyncStatus] user_id=%s device_id=%s", userID, deviceID)
+	for _, secretIDStr := range req.DeletedSecretIds {
+		result, err := s.processDelete(ctx, userID, secretIDStr)
+		if err != nil {
+			return err
+		}
+		if result != nil {
+			if result.Accepted {
+				*acceptedIDs = append(*acceptedIDs, result.SecretID)
+			} else if result.Conflict != nil {
+				*conflicts = append(*conflicts, result.Conflict)
+			}
+		}
+	}
 
-	// Get count of user's secrets (non-deleted only).
+	return nil
+}
+
+func (s *SyncService) processSecret(ctx context.Context, userID uuid.UUID, pbSecret *pb.Secret) (*OperationResult, error) {
+	secretID, err := uuid.Parse(pbSecret.Id)
+	if err != nil {
+		zap.L().Warn("Invalid secret_id in push request", zap.String("secret_id", pbSecret.Id))
+		return nil, nil
+	}
+
+	existingSecret, err := s.secretRepo.Get(ctx, secretID)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, fmt.Errorf("failed to check existing secret: %w", err)
+	}
+
+	var operation SyncOperation
+	if errors.Is(err, repository.ErrNotFound) {
+		operation = NewCreateOperation(s.secretRepo, pbSecret, s.limits.NonceSize)
+	} else {
+		operation = NewUpdateOperation(s.secretRepo, pbSecret, existingSecret, s.limits.NonceSize)
+	}
+
+	result, err := operation.Execute(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute sync operation: %w", err) //nolint:wrapcheck // operation error wrapped
+	}
+
+	return result, nil
+}
+
+func (s *SyncService) processDelete(ctx context.Context, userID uuid.UUID, secretIDStr string) (*OperationResult, error) {
+	secretID, err := uuid.Parse(secretIDStr)
+	if err != nil {
+		zap.L().Warn("Invalid deleted_secret_id in push request", zap.String("secret_id", secretIDStr))
+		return nil, nil
+	}
+
+	existingSecret, err := s.secretRepo.Get(ctx, secretID)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, fmt.Errorf("failed to check secret for deletion: %w", err)
+	}
+
+	operation := NewDeleteOperation(s.secretRepo, secretID, existingSecret)
+	result, err := operation.Execute(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute delete operation: %w", err) //nolint:wrapcheck // operation error wrapped
+	}
+
+	return result, nil
+}
+
+func (s *SyncService) GetSyncStatus(ctx context.Context, _ *pb.GetSyncStatusRequest) (*pb.GetSyncStatusResponse, error) {
+	userID, err := auth.GetUserIDAsUUID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user ID: %w", err) //nolint:wrapcheck // auth package error wrapped
+	}
+
+	deviceID := auth.GetDeviceIDFromContext(ctx)
+	zap.L().Debug("GetSyncStatus request",
+		zap.String("user_id", userID.String()),
+		zap.String("device_id", deviceID))
+
 	totalCount, err := s.secretRepo.CountByUser(ctx, userID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to count secrets: %v", err)
 	}
 
-	log.Printf("[SyncService.GetSyncStatus] user %s has %d secrets", userID, totalCount)
+	zap.L().Debug("GetSyncStatus response",
+		zap.String("user_id", userID.String()),
+		zap.Int32("total_secrets", totalCount))
 
 	return &pb.GetSyncStatusResponse{
 		LastSyncTime:   timestamppb.Now(),
 		TotalSecrets:   totalCount,
-		PendingChanges: 0, // Client-side concept, always 0 from server perspective.
+		PendingChanges: 0,
 	}, nil
-}
-
-// createSecret creates a new secret from proto message.
-func (s *SyncService) createSecret(ctx context.Context, userID uuid.UUID, pbSecret *pb.Secret) (*repository.Secret, error) {
-	// Parse the secret ID from the client.
-	secretID, err := uuid.Parse(pbSecret.Id)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid secret id: %v", err)
-	}
-
-	// Decode base64 encrypted data and extract nonce and ciphertext.
-	nonce, ciphertext, err := decodeEncryptedData(pbSecret.EncryptedData)
-	if err != nil {
-		return nil, err
-	}
-
-	// Serialize metadata to JSON.
-	metadataJSON, err := serializeMetadata(pbSecret.Metadata)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create secret entity with client-provided ID.
-	secret := &repository.Secret{
-		ID:            secretID,
-		UserID:        userID,
-		Name:          pbSecret.Title,
-		Type:          int32(pbSecret.Type),
-		EncryptedData: ciphertext,
-		Nonce:         nonce,
-		Metadata:      metadataJSON,
-	}
-
-	// Store in database (version will be set to 1).
-	created, err := s.secretRepo.Create(ctx, secret)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to create secret: %v", err)
-	}
-
-	return created, nil
-}
-
-// updateSecret updates an existing secret from proto message.
-func (s *SyncService) updateSecret(ctx context.Context, existing *repository.Secret, pbSecret *pb.Secret) (*repository.Secret, error) {
-	// Decode base64 encrypted data and extract nonce and ciphertext.
-	nonce, ciphertext, err := decodeEncryptedData(pbSecret.EncryptedData)
-	if err != nil {
-		return nil, err
-	}
-
-	// Serialize metadata to JSON.
-	metadataJSON, err := serializeMetadata(pbSecret.Metadata)
-	if err != nil {
-		return nil, err
-	}
-
-	// Update fields.
-	existing.Name = pbSecret.Title
-	existing.Type = int32(pbSecret.Type)
-	existing.EncryptedData = ciphertext
-	existing.Nonce = nonce
-	existing.Metadata = metadataJSON
-
-	// Update in database (uses optimistic locking, increments version).
-	updated, err := s.secretRepo.Update(ctx, existing)
-	if err != nil {
-		return nil, err
-	}
-
-	return updated, nil
 }

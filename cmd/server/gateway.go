@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"log"
 	"mime"
 	"net/http"
+	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -57,7 +58,7 @@ func StartGatewayServer(ctx context.Context, cfg GatewayConfig) error {
 		return fmt.Errorf("failed to register sync service: %w", err)
 	}
 
-	log.Println("gRPC-Gateway services registered")
+	zap.L().Info("gRPC-Gateway services registered")
 
 	// Create HTTP mux and register handlers.
 	mux := http.NewServeMux()
@@ -88,16 +89,22 @@ func StartGatewayServer(ctx context.Context, cfg GatewayConfig) error {
 
 	// Start HTTP server.
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
-	log.Printf("Starting HTTP gateway server on %s", addr)
-	log.Printf("Swagger UI available at http://localhost:%d/swagger/", cfg.HTTPPort)
-	log.Printf("OpenAPI spec available at http://localhost:%d/swagger.json", cfg.HTTPPort)
+	zap.L().Info("Starting HTTP gateway server",
+		zap.String("address", addr),
+		zap.String("swagger_ui", fmt.Sprintf("http://localhost:%d/swagger/", cfg.HTTPPort)),
+		zap.String("openapi_spec", fmt.Sprintf("http://localhost:%d/swagger.json", cfg.HTTPPort)))
 
 	server := &http.Server{
-		Addr:    addr,
-		Handler: handler,
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	return server.ListenAndServe()
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("HTTP gateway server failed: %w", err)
+	}
+
+	return nil
 }
 
 // serveSwaggerSpec returns a handler that serves the merged OpenAPI specification.
@@ -107,14 +114,14 @@ func serveSwaggerSpec() http.HandlerFunc {
 		spec, err := fs.ReadFile(swaggerUIFiles, "swagger-ui/keyper.swagger.json")
 		if err != nil {
 			http.Error(w, "OpenAPI spec not found", http.StatusNotFound)
-			log.Printf("Error reading OpenAPI spec: %v", err)
+			zap.L().Error("Error reading OpenAPI spec", zap.Error(err))
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write(spec); err != nil {
-			log.Printf("Error writing OpenAPI spec response: %v", err)
+			zap.L().Error("Error writing OpenAPI spec response", zap.Error(err))
 		}
 	}
 }
@@ -180,7 +187,7 @@ func healthHandler(healthService *health.Service) http.HandlerFunc {
 
 		w.WriteHeader(statusCode)
 		if err := json.NewEncoder(w).Encode(report); err != nil {
-			log.Printf("Error encoding health report: %v", err)
+			zap.L().Error("Error encoding health report", zap.Error(err))
 		}
 	}
 }
@@ -191,7 +198,7 @@ func livenessHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if _, err := w.Write([]byte(`{"status":"alive"}`)); err != nil {
-			log.Printf("Error writing liveness response: %v", err)
+			zap.L().Error("Error writing liveness response", zap.Error(err))
 		}
 	}
 }
@@ -221,7 +228,7 @@ func readinessHandler(healthService *health.Service) http.HandlerFunc {
 		}
 
 		if err := json.NewEncoder(w).Encode(response); err != nil {
-			log.Printf("Error encoding readiness response: %v", err)
+			zap.L().Error("Error encoding readiness response", zap.Error(err))
 		}
 	}
 }

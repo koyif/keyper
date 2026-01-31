@@ -134,22 +134,24 @@ func ToGRPCStatus(err error) error {
 	// Handle DomainError
 	var domainErr *DomainError
 	if errors.As(err, &domainErr) {
-		return status.Error(domainErrorToGRPCCode(domainErr.Code), domainErr.Message)
+		return status.Error(domainErrorToGRPCCode(domainErr.Code), domainErr.Message) //nolint:wrapcheck // gRPC status error is the correct format
 	}
 
 	// Handle repository errors
 	if errors.Is(err, repository.ErrNotFound) {
-		return status.Error(codes.NotFound, "resource not found")
+		return status.Error(codes.NotFound, "resource not found") //nolint:wrapcheck // gRPC status error is the correct format
 	}
+
 	if errors.Is(err, repository.ErrDuplicate) {
-		return status.Error(codes.AlreadyExists, "resource already exists")
+		return status.Error(codes.AlreadyExists, "resource already exists") //nolint:wrapcheck // gRPC status error is the correct format
 	}
+
 	if errors.Is(err, repository.ErrVersionConflict) {
-		return status.Error(codes.Aborted, "version conflict")
+		return status.Error(codes.Aborted, "version conflict") //nolint:wrapcheck // gRPC status error is the correct format
 	}
 
 	// Default to internal error
-	return status.Error(codes.Internal, "internal server error")
+	return status.Error(codes.Internal, "internal server error") //nolint:wrapcheck // gRPC status error is the correct format
 }
 
 // domainErrorToGRPCCode maps domain error codes to gRPC status codes.
@@ -188,7 +190,8 @@ func ToGRPCStatusWithDetails(err error, details string) error {
 		if details != "" {
 			message = fmt.Sprintf("%s: %s", message, details)
 		}
-		return status.Error(domainErrorToGRPCCode(domainErr.Code), message)
+
+		return status.Error(domainErrorToGRPCCode(domainErr.Code), message) //nolint:wrapcheck // gRPC status error is the correct format
 	}
 
 	return ToGRPCStatus(err)

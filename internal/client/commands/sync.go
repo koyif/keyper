@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -37,67 +38,63 @@ Use --force to resolve all conflicts by accepting the server version.`,
 			sess := getSess()
 
 			// Check authentication
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Status-only mode
+				if statusOnly {
+					return printSyncStatus(ctx, cfg, repo)
+				}
 
-			ctx := context.Background()
-
-			// Status-only mode
-			if statusOnly {
-				return printSyncStatus(ctx, cfg, repo)
-			}
-
-			// Perform full sync
-			fmt.Println("Starting synchronization...")
-			fmt.Println()
-
-			opts := &sync.SyncOptions{
-				ForceServerWins: forceServerWins,
-				ProgressCallback: func(msg string) {
-					fmt.Printf("  %s\n", msg)
-				},
-			}
-
-			result, err := sync.Sync(ctx, cfg, sess, repo, opts)
-			if err != nil {
-				return fmt.Errorf("sync failed: %w", err)
-			}
-
-			// Print sync results
-			fmt.Println()
-			fmt.Println("Sync Results:")
-			fmt.Println("─────────────────────────────────────")
-			fmt.Printf("  Total Duration:    %.2fs\n", result.TotalDuration.Seconds())
-			fmt.Printf("  Pull Duration:     %.2fs\n", result.PullDuration.Seconds())
-			fmt.Printf("  Push Duration:     %.2fs\n", result.PushDuration.Seconds())
-			fmt.Println()
-			fmt.Printf("  Pushed Secrets:    %d\n", result.PushedSecrets)
-			fmt.Printf("  Conflicts:         %d\n", result.ConflictCount)
-			fmt.Println()
-			fmt.Printf("  Initial Pending:   %d\n", result.InitialPendingCount)
-			fmt.Printf("  Final Pending:     %d\n", result.FinalPendingCount)
-			fmt.Println()
-
-			if result.LastSyncTime.IsZero() {
-				fmt.Printf("  Last Sync:         never\n")
-			} else {
-				fmt.Printf("  Last Sync:         %s\n", result.LastSyncTime.Format("2006-01-02 15:04:05"))
-			}
-
-			if result.Success {
+				// Perform full sync
+				fmt.Println("Starting synchronization...")
 				fmt.Println()
-				fmt.Println("✓ Sync completed successfully")
-			}
 
-			return nil
+				opts := &sync.SyncOptions{
+					ForceServerWins: forceServerWins,
+					ProgressCallback: func(msg string) {
+						fmt.Printf("  %s\n", msg)
+					},
+				}
+
+				result, err := sync.Sync(ctx, cfg, sess, repo, opts)
+				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("sync operation timed out after 30s")
+					}
+					return fmt.Errorf("sync failed: %w", err)
+				}
+
+				// Print sync results
+				fmt.Println()
+				fmt.Println("Sync Results:")
+				fmt.Println("─────────────────────────────────────")
+				fmt.Printf("  Total Duration:    %.2fs\n", result.TotalDuration.Seconds())
+				fmt.Printf("  Pull Duration:     %.2fs\n", result.PullDuration.Seconds())
+				fmt.Printf("  Push Duration:     %.2fs\n", result.PushDuration.Seconds())
+				fmt.Println()
+				fmt.Printf("  Pushed Secrets:    %d\n", result.PushedSecrets)
+				fmt.Printf("  Conflicts:         %d\n", result.ConflictCount)
+				fmt.Println()
+				fmt.Printf("  Initial Pending:   %d\n", result.InitialPendingCount)
+				fmt.Printf("  Final Pending:     %d\n", result.FinalPendingCount)
+				fmt.Println()
+
+				if result.LastSyncTime.IsZero() {
+					fmt.Printf("  Last Sync:         never\n")
+				} else {
+					fmt.Printf("  Last Sync:         %s\n", result.LastSyncTime.Format("2006-01-02 15:04:05"))
+				}
+
+				if result.Success {
+					fmt.Println()
+					fmt.Println("✓ Sync completed successfully")
+				}
+
+				return nil
+			})
 		},
 	}
 
@@ -112,6 +109,9 @@ Use --force to resolve all conflicts by accepting the server version.`,
 func printSyncStatus(ctx context.Context, cfg *config.Config, repo storage.Repository) error {
 	status, err := sync.GetSyncStatusInfo(ctx, cfg, repo)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("sync status check timed out after 30s")
+		}
 		return fmt.Errorf("failed to get sync status: %w", err)
 	}
 

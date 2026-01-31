@@ -24,6 +24,9 @@ func TestNewTombstoneCleanup(t *testing.T) {
 	cfg := Config{
 		RetentionPeriod: 30 * 24 * time.Hour,
 		Schedule:        24 * time.Hour,
+		BatchSize:       1000,
+		BatchDelay:      100 * time.Millisecond,
+		CleanupTimeout:  10 * time.Minute,
 	}
 
 	tc := NewTombstoneCleanup(repo, cfg)
@@ -44,6 +47,10 @@ func TestNewTombstoneCleanup(t *testing.T) {
 		t.Errorf("Schedule = %v, want %v", tc.schedule, cfg.Schedule)
 	}
 
+	if tc.batchSize != cfg.BatchSize {
+		t.Errorf("BatchSize = %v, want %v", tc.batchSize, cfg.BatchSize)
+	}
+
 	if tc.stopCh == nil {
 		t.Error("stopCh not initialized")
 	}
@@ -54,6 +61,9 @@ func TestDefaultConfig(t *testing.T) {
 
 	expectedRetention := 30 * 24 * time.Hour
 	expectedSchedule := 24 * time.Hour
+	expectedBatchSize := 1000
+	expectedBatchDelay := 100 * time.Millisecond
+	expectedCleanupTimeout := 10 * time.Minute
 
 	if cfg.RetentionPeriod != expectedRetention {
 		t.Errorf("RetentionPeriod = %v, want %v", cfg.RetentionPeriod, expectedRetention)
@@ -61,6 +71,18 @@ func TestDefaultConfig(t *testing.T) {
 
 	if cfg.Schedule != expectedSchedule {
 		t.Errorf("Schedule = %v, want %v", cfg.Schedule, expectedSchedule)
+	}
+
+	if cfg.BatchSize != expectedBatchSize {
+		t.Errorf("BatchSize = %v, want %v", cfg.BatchSize, expectedBatchSize)
+	}
+
+	if cfg.BatchDelay != expectedBatchDelay {
+		t.Errorf("BatchDelay = %v, want %v", cfg.BatchDelay, expectedBatchDelay)
+	}
+
+	if cfg.CleanupTimeout != expectedCleanupTimeout {
+		t.Errorf("CleanupTimeout = %v, want %v", cfg.CleanupTimeout, expectedCleanupTimeout)
 	}
 }
 
@@ -83,6 +105,9 @@ func TestCleanup_Success(t *testing.T) {
 	cfg := Config{
 		RetentionPeriod: 30 * 24 * time.Hour,
 		Schedule:        1 * time.Hour,
+		BatchSize:       1000,
+		BatchDelay:      100 * time.Millisecond,
+		CleanupTimeout:  10 * time.Minute,
 	}
 
 	tc := NewTombstoneCleanup(repo, cfg)
@@ -118,6 +143,9 @@ func TestCleanup_Error(t *testing.T) {
 	cfg := Config{
 		RetentionPeriod: 30 * 24 * time.Hour,
 		Schedule:        1 * time.Hour,
+		BatchSize:       1000,
+		BatchDelay:      100 * time.Millisecond,
+		CleanupTimeout:  10 * time.Minute,
 	}
 
 	tc := NewTombstoneCleanup(repo, cfg)
@@ -146,6 +174,9 @@ func TestCleanup_BatchProcessing(t *testing.T) {
 	cfg := Config{
 		RetentionPeriod: 30 * 24 * time.Hour,
 		Schedule:        1 * time.Hour,
+		BatchSize:       1000,
+		BatchDelay:      10 * time.Millisecond, // Use shorter delay for test
+		CleanupTimeout:  10 * time.Minute,
 	}
 
 	tc := NewTombstoneCleanup(repo, cfg)
@@ -167,6 +198,9 @@ func TestStartStop(t *testing.T) {
 	cfg := Config{
 		RetentionPeriod: 30 * 24 * time.Hour,
 		Schedule:        100 * time.Millisecond, // Short schedule for testing
+		BatchSize:       1000,
+		BatchDelay:      10 * time.Millisecond,
+		CleanupTimeout:  10 * time.Minute,
 	}
 
 	tc := NewTombstoneCleanup(repo, cfg)

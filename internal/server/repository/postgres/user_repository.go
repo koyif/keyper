@@ -13,19 +13,16 @@ import (
 	"github.com/koyif/keyper/internal/server/repository"
 )
 
-// UserRepository implements user data access operations using PostgreSQL.
 type UserRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewUserRepository creates a new UserRepository instance.
 func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{
 		pool: pool,
 	}
 }
 
-// CreateUser creates a new user and returns the created user with generated ID.
 func (r *UserRepository) CreateUser(ctx context.Context, email string, passwordHash, encryptionKeyVerifier, salt []byte) (*repository.User, error) {
 	query := `
 		INSERT INTO users (email, password_hash, encryption_key_verifier, salt)
@@ -56,7 +53,6 @@ func (r *UserRepository) CreateUser(ctx context.Context, email string, passwordH
 	return &user, nil
 }
 
-// GetUserByEmail retrieves a user by email address.
 // Returns repository.ErrNotFound if the user doesn't exist.
 func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (*repository.User, error) {
 	query := `
@@ -86,7 +82,6 @@ func (r *UserRepository) GetUserByEmail(ctx context.Context, email string) (*rep
 	return &user, nil
 }
 
-// GetUserByID retrieves a user by ID.
 // Returns repository.ErrNotFound if the user doesn't exist.
 func (r *UserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*repository.User, error) {
 	query := `
@@ -116,7 +111,6 @@ func (r *UserRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*reposi
 	return &user, nil
 }
 
-// Update updates an existing user's information.
 func (r *UserRepository) Update(ctx context.Context, user *repository.User) error {
 	query := `
 		UPDATE users

@@ -42,14 +42,14 @@ func TestNewSQLiteRepository(t *testing.T) {
 
 	// Verify schema_migrations table exists
 	var count int
-	err = repo.db.QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count)
+	err = repo.db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM schema_migrations").Scan(&count)
 	if err != nil {
 		t.Errorf("schema_migrations table not found: %v", err)
 	}
 
 	// Verify current version is set
 	var version int
-	err = repo.db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version)
+	err = repo.db.QueryRowContext(context.Background(), "SELECT MAX(version) FROM schema_migrations").Scan(&version)
 	if err != nil {
 		t.Errorf("Failed to get schema version: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestMigrationIdempotency(t *testing.T) {
 
 	// Verify version is still correct
 	var version int
-	err = repo2.db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&version)
+	err = repo2.db.QueryRowContext(context.Background(), "SELECT MAX(version) FROM schema_migrations").Scan(&version)
 	if err != nil {
 		t.Errorf("Failed to get schema version: %v", err)
 	}
@@ -512,7 +512,7 @@ func TestIndexes(t *testing.T) {
 	repo := setupTestDB(t)
 
 	// Verify indexes exist
-	rows, err := repo.db.Query(`
+	rows, err := repo.db.QueryContext(context.Background(), `
 		SELECT name FROM sqlite_master
 		WHERE type='index' AND tbl_name='secrets'
 	`)
@@ -528,6 +528,10 @@ func TestIndexes(t *testing.T) {
 			t.Fatalf("Failed to scan index name: %v", err)
 		}
 		indexes[name] = true
+	}
+
+	if err := rows.Err(); err != nil {
+		t.Fatalf("Error iterating over rows: %v", err)
 	}
 
 	expectedIndexes := []string{

@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/lib/pq"
+	"github.com/sirupsen/logrus"
 )
 
 // Config holds database configuration
@@ -45,7 +47,7 @@ func New(cfg Config) (*DB, error) {
 	sqlDB.SetConnMaxLifetime(5 * time.Minute)
 	sqlDB.SetConnMaxIdleTime(1 * time.Minute)
 
-	if err := sqlDB.Ping(); err != nil {
+	if err := sqlDB.PingContext(context.Background()); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
@@ -81,12 +83,12 @@ func (db *DB) runMigrations() error {
 	}
 	defer m.Close()
 
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	version, dirty, err := m.Version()
-	if err != nil && err != migrate.ErrNilVersion {
+	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {
 		return fmt.Errorf("failed to get migration version: %w", err)
 	}
 
@@ -94,10 +96,10 @@ func (db *DB) runMigrations() error {
 		return fmt.Errorf("database is in dirty state at version %d", version)
 	}
 
-	if err == migrate.ErrNilVersion {
-		fmt.Println("Database migrations completed successfully (no migrations found)")
+	if errors.Is(err, migrate.ErrNilVersion) {
+		logrus.Info("Database migrations completed successfully (no migrations found)")
 	} else {
-		fmt.Printf("Database migrations completed successfully (version: %d)\n", version)
+		logrus.Infof("Database migrations completed successfully (version: %d)", version)
 	}
 
 	return nil
@@ -105,12 +107,21 @@ func (db *DB) runMigrations() error {
 
 // Close closes the database connection
 func (db *DB) Close() error {
-	return db.DB.Close()
+	if err := db.DB.Close(); err != nil {
+		return fmt.Errorf("failed to close database: %w", err)
+	}
+
+	return nil
 }
 
 // Health checks if the database connection is healthy
 func (db *DB) Health() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	return db.PingContext(ctx)
+
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("database health check failed: %w", err)
+	}
+
+	return nil
 }

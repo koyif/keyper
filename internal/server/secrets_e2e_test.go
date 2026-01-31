@@ -22,6 +22,7 @@ import (
 
 	"github.com/koyif/keyper/internal/crypto"
 	"github.com/koyif/keyper/internal/server/auth"
+	"github.com/koyif/keyper/internal/server/config"
 	"github.com/koyif/keyper/internal/server/handlers"
 	"github.com/koyif/keyper/internal/server/repository/postgres"
 	"github.com/koyif/keyper/internal/server/testhelpers"
@@ -63,11 +64,12 @@ func setupSecretTestServer(t *testing.T, tc *testhelpers.TestContainer) *testSec
 	authService := handlers.NewAuthService(userRepo, refreshTokenRepo, jwtManager, tokenBlacklist)
 	pb.RegisterAuthServiceServer(grpcServer, authService)
 
-	secretsService := handlers.NewSecretsService(secretRepo)
+	secretsService := handlers.NewSecretsService(secretRepo, config.DefaultLimits())
 	pb.RegisterSecretsServiceServer(grpcServer, secretsService)
 
 	// Listen on random available port.
-	listener, err := net.Listen("tcp", "localhost:0")
+	lc := &net.ListenConfig{}
+	listener, err := lc.Listen(context.Background(), "tcp", "localhost:0")
 	require.NoError(t, err, "failed to create listener")
 
 	// Start server in background.

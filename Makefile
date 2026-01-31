@@ -25,7 +25,7 @@ PROTOC_GEN_GO := $(shell go env GOPATH)/bin/protoc-gen-go
 PROTOC_GEN_GO_GRPC := $(shell go env GOPATH)/bin/protoc-gen-go-grpc
 PROTOC_GEN_GRPC_GATEWAY := $(shell go env GOPATH)/bin/protoc-gen-grpc-gateway
 PROTOC_GEN_OPENAPIV2 := $(shell go env GOPATH)/bin/protoc-gen-openapiv2
-GOLANGCI_LINT := $(shell go env GOPATH)/bin/golangci-lint
+GOLANGCI_LINT := golangci-lint
 
 # Include paths for googleapis
 GOOGLEAPIS_DIR := third_party

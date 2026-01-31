@@ -5,15 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/grpcutil"
 	"github.com/koyif/keyper/internal/client/session"
 	"github.com/koyif/keyper/internal/client/storage"
 	pb "github.com/koyif/keyper/pkg/api/proto"
@@ -40,7 +38,7 @@ func Push(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 	}
 
 	// Ensure token is valid, refresh if necessary
-	if err := sess.EnsureValidToken(cfg.Server, grpc.WithTransportCredentials(insecure.NewCredentials())); err != nil {
+	if err := sess.EnsureValidToken(cfg.Server); err != nil {
 		return nil, fmt.Errorf("failed to ensure valid token: %w", err)
 	}
 
@@ -58,7 +56,7 @@ func Push(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 
 	// If no pending secrets, return early
 	if len(pendingSecrets) == 0 {
-		log.Println("No pending secrets to push")
+		logrus.Debug("No pending secrets to push")
 		return &PushResult{
 			Message: "No changes to push",
 		}, nil
@@ -74,31 +72,24 @@ func Push(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 		} else {
 			protoSecret, err := convertToProtoSecret(local)
 			if err != nil {
-				log.Printf("Warning: failed to convert secret %s: %v", local.ID, err)
+				logrus.Debugf("Warning: failed to convert secret %s: %v", local.ID, err)
 				continue
 			}
 			secretsToSend = append(secretsToSend, protoSecret)
 		}
 	}
 
-	log.Printf("Pushing %d secrets and %d deletions to server", len(secretsToSend), len(deletedIDs))
+	logrus.Debugf("Pushing %d secrets and %d deletions to server", len(secretsToSend), len(deletedIDs))
 
-	// Connect to server
-	conn, err := grpc.NewClient(cfg.Server, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// Connect to server with authentication
+	conn, ctx, err := grpcutil.NewAuthenticatedConnection(ctx, cfg.Server, sess.GetAccessToken(), deviceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to server: %w", err)
+		return nil, err
 	}
 	defer conn.Close()
 
 	// Create SyncService client
 	client := pb.NewSyncServiceClient(conn)
-
-	// Add authentication token to context
-	md := metadata.New(map[string]string{
-		"authorization": "Bearer " + sess.GetAccessToken(),
-		"device-id":     deviceID,
-	})
-	ctx = metadata.NewOutgoingContext(ctx, md)
 
 	// Set timeout for the request
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -148,16 +139,16 @@ func Push(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 
 	// Handle conflicts
 	if len(resp.Conflicts) > 0 {
-		log.Printf("Push completed with %d conflicts", len(resp.Conflicts))
+		logrus.Debugf("Push completed with %d conflicts", len(resp.Conflicts))
 		// Mark conflicted secrets with conflict status
 		for _, conflict := range resp.Conflicts {
 			if err := repo.UpdateSyncStatus(ctx, conflict.SecretId, storage.SyncStatusConflict, 0); err != nil {
-				log.Printf("Warning: failed to mark secret %s as conflict: %v", conflict.SecretId, err)
+				logrus.Debugf("Warning: failed to mark secret %s as conflict: %v", conflict.SecretId, err)
 			}
 		}
 	}
 
-	log.Printf("Push successful: %d accepted, %d conflicts, %d failed",
+	logrus.Debugf("Push successful: %d accepted, %d conflicts, %d failed",
 		len(result.AcceptedSecretIDs), len(result.Conflicts), len(result.FailedSecretIDs))
 
 	return result, nil
@@ -196,7 +187,7 @@ func updateSyncStatusAfterPush(ctx context.Context, repo storage.Repository, acc
 	for _, id := range acceptedIDs {
 		if err := repo.UpdateSyncStatus(ctx, id, storage.SyncStatusSynced, newVersion); err != nil {
 			// Log warning but don't fail the entire operation
-			log.Printf("Warning: failed to update sync status for %s: %v", id, err)
+			logrus.Debugf("Warning: failed to update sync status for %s: %v", id, err)
 		}
 	}
 	return nil
@@ -220,7 +211,7 @@ func PushWithRetry(ctx context.Context, cfg *config.Config, sess *session.Sessio
 		result, err := Push(ctx, cfg, sess, repo)
 		if err != nil {
 			lastErr = err
-			log.Printf("Push attempt %d failed: %v", attempt+1, err)
+			logrus.Debugf("Push attempt %d failed: %v", attempt+1, err)
 
 			// If this is the last attempt, return the error
 			if attempt == maxRetries {
@@ -229,7 +220,7 @@ func PushWithRetry(ctx context.Context, cfg *config.Config, sess *session.Sessio
 
 			// Wait before retrying with exponential backoff
 			delay := baseDelay * time.Duration(1<<uint(attempt))
-			log.Printf("Retrying push in %v...", delay)
+			logrus.Debugf("Retrying push in %v...", delay)
 			time.Sleep(delay)
 			continue
 		}
@@ -240,38 +231,38 @@ func PushWithRetry(ctx context.Context, cfg *config.Config, sess *session.Sessio
 		if len(result.Conflicts) == 0 {
 			// Success - no conflicts
 			if attempt > 0 {
-				log.Printf("Push successful after %d retry attempts", attempt)
+				logrus.Debugf("Push successful after %d retry attempts", attempt)
 			}
 			return result, nil
 		}
 
 		// Conflicts detected
-		log.Printf("Push attempt %d: detected %d conflicts", attempt+1, len(result.Conflicts))
+		logrus.Debugf("Push attempt %d: detected %d conflicts", attempt+1, len(result.Conflicts))
 
 		// If this is the last attempt, don't retry - just return the result with conflicts
 		if attempt == maxRetries {
-			log.Printf("Max retry attempts (%d) reached. Conflicts remain unresolved.", maxRetries+1)
+			logrus.Debugf("Max retry attempts (%d) reached. Conflicts remain unresolved.", maxRetries+1)
 			return result, nil
 		}
 
 		// Log each conflict
 		for _, conflict := range result.Conflicts {
-			log.Printf("Conflict on secret %s: %s", conflict.SecretId, conflict.Description)
+			logrus.Debugf("Conflict on secret %s: %s", conflict.SecretId, conflict.Description)
 		}
 
 		// Trigger Pull to fetch latest server state and merge
-		log.Printf("Triggering pull to fetch latest server state and resolve conflicts...")
+		logrus.Debugf("Triggering pull to fetch latest server state and resolve conflicts...")
 		if err := PullAndSync(ctx, cfg, sess, repo); err != nil {
-			log.Printf("Warning: Pull failed during conflict resolution: %v", err)
+			logrus.Debugf("Warning: Pull failed during conflict resolution: %v", err)
 			// Continue with retry anyway - the local state might still be valid
 		} else {
-			log.Printf("Pull completed successfully - conflicts resolved with latest server state")
+			logrus.Debugf("Pull completed successfully - conflicts resolved with latest server state")
 		}
 
 		// Wait before retrying with exponential backoff
 		if attempt < maxRetries {
 			delay := baseDelay * time.Duration(1<<uint(attempt))
-			log.Printf("Waiting %v before retry attempt %d...", delay, attempt+2)
+			logrus.Debugf("Waiting %v before retry attempt %d...", delay, attempt+2)
 			time.Sleep(delay)
 		}
 	}

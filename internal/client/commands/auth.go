@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/koyif/keyper/internal/client/config"
+	"github.com/koyif/keyper/internal/client/grpcutil"
 	"github.com/koyif/keyper/internal/client/session"
 	"github.com/koyif/keyper/internal/client/storage"
 	"github.com/koyif/keyper/internal/client/sync"
@@ -15,8 +16,6 @@ import (
 	pb "github.com/koyif/keyper/pkg/api/proto"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // NewAuthCommands returns the auth command group
@@ -115,10 +114,10 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 				return fmt.Errorf("failed to generate key verifier: %w", err)
 			}
 
-			// Connect to server
-			conn, err := grpc.NewClient(cfg.Server, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			// Connect to server (unauthenticated for registration)
+			conn, err := grpcutil.NewUnauthenticatedConnection(cfg.Server)
 			if err != nil {
-				return fmt.Errorf("failed to connect to server: %w", err)
+				return err
 			}
 			defer conn.Close()
 
@@ -148,9 +147,9 @@ func newRegisterCmd(getCfg func() *config.Config, getSess func() *session.Sessio
 				return fmt.Errorf("failed to save session: %w", err)
 			}
 
-			fmt.Printf("✓ Registration successful!\n")
-			fmt.Printf("  User ID: %s\n", resp.UserId)
-			fmt.Printf("  %s\n", resp.Message)
+			fmt.Fprintf(cmd.OutOrStdout(), "✓ Registration successful!\n")
+			fmt.Fprintf(cmd.OutOrStdout(), "  User ID: %s\n", resp.UserId)
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", resp.Message)
 
 			return nil
 		},
@@ -219,10 +218,10 @@ func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session, 
 			}
 			authHash := crypto.HashMasterPassword(password, authSalt)
 
-			// Connect to server
-			conn, err := grpc.NewClient(cfg.Server, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			// Connect to server (unauthenticated for login)
+			conn, err := grpcutil.NewUnauthenticatedConnection(cfg.Server)
 			if err != nil {
-				return fmt.Errorf("failed to connect to server: %w", err)
+				return err
 			}
 			defer conn.Close()
 
@@ -251,18 +250,20 @@ func newLoginCmd(getCfg func() *config.Config, getSess func() *session.Session, 
 				return fmt.Errorf("failed to save session: %w", err)
 			}
 
-			fmt.Printf("✓ Login successful!\n")
-			fmt.Printf("  User ID: %s\n", resp.UserId)
-			fmt.Printf("  %s\n", resp.Message)
+			fmt.Fprintf(cmd.OutOrStdout(), "✓ Login successful!\n")
+			fmt.Fprintf(cmd.OutOrStdout(), "  User ID: %s\n", resp.UserId)
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", resp.Message)
 
 			// Trigger automatic sync after login (unless --no-sync flag is set)
 			if !noSync {
-				fmt.Println()
-				if err := performAutoSync(ctx, cfg, sess, getStorage); err != nil {
+				fmt.Fprintln(cmd.OutOrStdout())
+				syncCtx, syncCancel := session.DatabaseContext()
+				defer syncCancel()
+				if err := performAutoSync(syncCtx, cfg, sess, getStorage); err != nil {
 					// Log warning but don't fail the login
 					logrus.Warnf("Automatic sync failed: %v", err)
-					fmt.Printf("\n⚠ Automatic sync failed: %v\n", err)
-					fmt.Println("You can manually sync later with: keyper sync")
+					fmt.Fprintf(cmd.OutOrStdout(), "\n⚠ Automatic sync failed: %v\n", err)
+					fmt.Fprintln(cmd.OutOrStdout(), "You can manually sync later with: keyper sync")
 				}
 			}
 
@@ -292,8 +293,8 @@ func newLogoutCmd(getCfg func() *config.Config, getSess func() *session.Session)
 
 			logrus.Debug("Logging out...")
 
-			// Connect to server
-			conn, err := grpc.NewClient(cfg.Server, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			// Connect to server (unauthenticated for logout)
+			conn, err := grpcutil.NewUnauthenticatedConnection(cfg.Server)
 			if err != nil {
 				logrus.Warnf("Failed to connect to server: %v", err)
 				// Continue with local logout even if server is unreachable
@@ -319,7 +320,7 @@ func newLogoutCmd(getCfg func() *config.Config, getSess func() *session.Session)
 				return fmt.Errorf("failed to clear session: %w", err)
 			}
 
-			fmt.Println("✓ Logged out successfully")
+			fmt.Fprintln(cmd.OutOrStdout(), "✓ Logged out successfully")
 
 			return nil
 		},
@@ -329,7 +330,7 @@ func newLogoutCmd(getCfg func() *config.Config, getSess func() *session.Session)
 // performAutoSync performs an automatic sync after login.
 // This is a non-blocking operation that provides user feedback.
 func performAutoSync(ctx context.Context, cfg *config.Config, sess *session.Session, getStorage func() (storage.Repository, error)) error {
-	fmt.Println("Syncing with server...")
+	logrus.Info("Syncing with server...")
 
 	// Open storage
 	repo, err := getStorage()
@@ -348,12 +349,12 @@ func performAutoSync(ctx context.Context, cfg *config.Config, sess *session.Sess
 	// Perform sync
 	result, err := sync.Sync(ctx, cfg, sess, repo, opts)
 	if err != nil {
-		return err
+		return fmt.Errorf("sync failed: %w", err)
 	}
 
-	// Print brief summary
+	// Log brief summary
 	if result.Success {
-		fmt.Printf("✓ Sync complete: %d changes pushed, %d conflicts\n",
+		logrus.Infof("Sync complete: %d changes pushed, %d conflicts",
 			result.PushedSecrets, result.ConflictCount)
 	}
 

@@ -255,6 +255,7 @@ type ListItem struct {
 
 // Templates
 
+//nolint:gosec // G101: False positive - this is a display template, not hardcoded credentials
 const credentialTemplate = `
 {{ bold "Credential:" }} {{ cyan .Name }}
 {{ bold "ID:" }} {{ .ID }}

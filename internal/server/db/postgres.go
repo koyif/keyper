@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	"go.uber.org/zap"
 )
 
-// Config holds PostgreSQL database configuration.
 type Config struct {
 	Host     string
 	Port     int
@@ -23,19 +24,16 @@ type Config struct {
 	Database string
 	SSLMode  string
 
-	// Connection pool settings
 	MaxConns          int32
 	MinConns          int32
 	MaxConnLifetime   time.Duration
 	MaxConnIdleTime   time.Duration
 	HealthCheckPeriod time.Duration
 
-	// Migration settings
-	SkipMigrations bool   // Skip running migrations (useful for tests)
-	MigrationsPath string // Path to migrations directory (defaults to "migrations" if empty)
+	SkipMigrations bool
+	MigrationsPath string
 }
 
-// DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
 		Host:              "localhost",
@@ -49,14 +47,12 @@ func DefaultConfig() *Config {
 	}
 }
 
-// Pool wraps pgxpool.Pool with additional functionality.
 type Pool struct {
 	*pgxpool.Pool
 	config *Config
 }
 
-// NewPool creates a new database connection pool with the given configuration.
-// It implements connection retry with exponential backoff and runs health checks.
+// Implements connection retry with exponential backoff and runs health checks.
 // If cfg is nil, DefaultConfig() is used (note: default config lacks credentials and will fail to connect).
 func NewPool(ctx context.Context, cfg *Config) (*Pool, error) {
 	if cfg == nil {
@@ -84,33 +80,35 @@ func NewPool(ctx context.Context, cfg *Config) (*Pool, error) {
 	poolConfig.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
 		// Set timezone to UTC for consistency
 		_, err := conn.Exec(ctx, "SET timezone = 'UTC'")
-		return err
+		if err != nil {
+			return fmt.Errorf("failed to set timezone: %w", err) //nolint:wrapcheck // pgx error wrapped
+		}
+
+		return nil
 	}
 
 	// Attempt to create pool with retry logic
-	const maxRetries = 5
 	var pool *pgxpool.Pool
-	backoff := time.Second
+	retryCfg := DefaultRetryConfig()
 
-	for i := range maxRetries {
+	err = Retry(ctx, retryCfg, func() error {
+		var err error
 		pool, err = pgxpool.NewWithConfig(ctx, poolConfig)
-		if err == nil {
-			// Test the connection
-			if err = pool.Ping(ctx); err == nil {
-				break
-			}
-			pool.Close()
-			err = fmt.Errorf("ping failed: %w", err)
+		if err != nil {
+			return fmt.Errorf("failed to create pool: %w", err)
 		}
 
-		if i < maxRetries-1 {
-			time.Sleep(backoff)
-			backoff *= 2
+		// Test the connection
+		if err = pool.Ping(ctx); err != nil {
+			pool.Close()
+			return fmt.Errorf("ping failed: %w", err)
 		}
-	}
+
+		return nil
+	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database after %d retries: %w", maxRetries, err)
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
 	p := &Pool{
@@ -129,7 +127,6 @@ func NewPool(ctx context.Context, cfg *Config) (*Pool, error) {
 	return p, nil
 }
 
-// Health performs a health check on the database connection.
 func (p *Pool) Health(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -141,17 +138,14 @@ func (p *Pool) Health(ctx context.Context) error {
 	return nil
 }
 
-// Stats returns connection pool statistics.
 func (p *Pool) Stats() *pgxpool.Stat {
 	return p.Stat()
 }
 
-// Close closes all connections in the pool.
 func (p *Pool) Close() {
 	p.Pool.Close()
 }
 
-// runMigrations executes database migrations.
 // Note: ctx parameter is reserved for future use (e.g., cancellation support).
 func (p *Pool) runMigrations(_ context.Context) error {
 	// Register pgx driver with database/sql.
@@ -163,13 +157,11 @@ func (p *Pool) runMigrations(_ context.Context) error {
 		return fmt.Errorf("failed to create migration driver: %w", err)
 	}
 
-	// Use configured migrations path or default to "migrations".
 	migrationsPath := "migrations"
 	if p.config.MigrationsPath != "" {
 		migrationsPath = p.config.MigrationsPath
 	}
 
-	// Migrations are expected to be in the migrations/ directory.
 	m, err := migrate.NewWithDatabaseInstance(
 		"file://"+migrationsPath,
 		"postgres",
@@ -180,12 +172,12 @@ func (p *Pool) runMigrations(_ context.Context) error {
 	}
 	defer m.Close()
 
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	version, dirty, err := m.Version()
-	if err != nil && err != migrate.ErrNilVersion {
+	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {
 		return fmt.Errorf("failed to get migration version: %w", err)
 	}
 
@@ -193,10 +185,10 @@ func (p *Pool) runMigrations(_ context.Context) error {
 		return fmt.Errorf("database is in dirty state at version %d", version)
 	}
 
-	if err == migrate.ErrNilVersion {
-		fmt.Println("Database migrations completed successfully (no migrations found)")
+	if errors.Is(err, migrate.ErrNilVersion) {
+		zap.L().Info("Database migrations completed successfully (no migrations found)")
 	} else {
-		fmt.Printf("Database migrations completed successfully (version: %d)\n", version)
+		zap.L().Info("Database migrations completed successfully", zap.Uint("version", version))
 	}
 
 	return nil

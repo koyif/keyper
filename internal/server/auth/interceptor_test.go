@@ -322,7 +322,6 @@ func TestUnaryAuthInterceptorWithBlacklist(t *testing.T) {
 		t.Fatalf("Failed to generate token: %v", err)
 	}
 
-	// Test 1: Valid token not in blacklist
 	md := metadata.Pairs("authorization", "Bearer "+token)
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 	info := &grpc.UnaryServerInfo{FullMethod: "/keyper.api.v1.SecretsService/Create"}
@@ -336,7 +335,6 @@ func TestUnaryAuthInterceptorWithBlacklist(t *testing.T) {
 		t.Errorf("Expected no error with valid token, got: %v", err)
 	}
 
-	// Test 2: Add token to blacklist and verify it's rejected
 	claims, _ := manager.ValidateToken(token)
 	blacklist.Add(token, claims.ExpiresAt.Time)
 
@@ -357,4 +355,109 @@ func TestUnaryAuthInterceptorWithBlacklist(t *testing.T) {
 	if st.Message() != "token has been revoked" {
 		t.Errorf("Expected 'token has been revoked' message, got: %s", st.Message())
 	}
+}
+
+func TestGetUserIDAsUUID_ValidUserID(t *testing.T) {
+	expectedUserID := uuid.New()
+	ctx := context.WithValue(context.Background(), UserIDContextKey, expectedUserID.String())
+
+	userID, err := GetUserIDAsUUID(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error with valid user ID, got: %v", err)
+	}
+
+	if userID != expectedUserID {
+		t.Errorf("Expected user ID %s, got %s", expectedUserID, userID)
+	}
+}
+
+func TestGetUserIDAsUUID_InvalidUUIDFormat(t *testing.T) {
+	ctx := context.WithValue(context.Background(), UserIDContextKey, "not-a-valid-uuid")
+
+	userID, err := GetUserIDAsUUID(ctx)
+	if err == nil {
+		t.Fatal("Expected error for invalid UUID format")
+	}
+
+	if userID != uuid.Nil {
+		t.Errorf("Expected uuid.Nil for invalid UUID, got %s", userID)
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatal("Error should be a gRPC status error")
+	}
+
+	if st.Code() != codes.Internal {
+		t.Errorf("Expected code Internal, got %v", st.Code())
+	}
+
+	expectedMsg := "invalid user_id in context"
+	if !contains(st.Message(), expectedMsg) {
+		t.Errorf("Expected error message to contain '%s', got: %s", expectedMsg, st.Message())
+	}
+}
+
+func TestGetUserIDAsUUID_MissingUserID(t *testing.T) {
+	ctx := context.Background()
+
+	userID, err := GetUserIDAsUUID(ctx)
+	if err == nil {
+		t.Fatal("Expected error when user ID is not in context")
+	}
+
+	if userID != uuid.Nil {
+		t.Errorf("Expected uuid.Nil when user ID is missing, got %s", userID)
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatal("Error should be a gRPC status error")
+	}
+
+	if st.Code() != codes.Unauthenticated {
+		t.Errorf("Expected code Unauthenticated, got %v", st.Code())
+	}
+
+	expectedMsg := "user not authenticated"
+	if st.Message() != expectedMsg {
+		t.Errorf("Expected error message '%s', got: %s", expectedMsg, st.Message())
+	}
+}
+
+func TestGetUserIDAsUUID_EmptyUserID(t *testing.T) {
+	ctx := context.WithValue(context.Background(), UserIDContextKey, "")
+
+	userID, err := GetUserIDAsUUID(ctx)
+	if err == nil {
+		t.Fatal("Expected error when user ID is empty")
+	}
+
+	if userID != uuid.Nil {
+		t.Errorf("Expected uuid.Nil when user ID is empty, got %s", userID)
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatal("Error should be a gRPC status error")
+	}
+
+	if st.Code() != codes.Unauthenticated {
+		t.Errorf("Expected code Unauthenticated, got %v", st.Code())
+	}
+}
+
+// contains is a helper function to check if a string contains a substring.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

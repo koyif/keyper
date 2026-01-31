@@ -13,19 +13,16 @@ import (
 	"github.com/koyif/keyper/internal/server/repository"
 )
 
-// RefreshTokenRepository implements refresh token data access operations using PostgreSQL.
 type RefreshTokenRepository struct {
 	pool *pgxpool.Pool
 }
 
-// NewRefreshTokenRepository creates a new RefreshTokenRepository instance.
 func NewRefreshTokenRepository(pool *pgxpool.Pool) *RefreshTokenRepository {
 	return &RefreshTokenRepository{
 		pool: pool,
 	}
 }
 
-// Create creates a new refresh token and returns it with generated ID.
 func (r *RefreshTokenRepository) Create(ctx context.Context, userID uuid.UUID, tokenHash []byte, deviceID *string, expiresAt time.Time) (*repository.RefreshToken, error) {
 	query := `
 		INSERT INTO refresh_tokens (user_id, token_hash, device_id, expires_at)
@@ -50,7 +47,6 @@ func (r *RefreshTokenRepository) Create(ctx context.Context, userID uuid.UUID, t
 	return &token, nil
 }
 
-// GetByTokenHash retrieves a refresh token by its hash.
 // Returns repository.ErrNotFound if the token doesn't exist or has expired.
 func (r *RefreshTokenRepository) GetByTokenHash(ctx context.Context, tokenHash []byte) (*repository.RefreshToken, error) {
 	query := `
@@ -79,7 +75,6 @@ func (r *RefreshTokenRepository) GetByTokenHash(ctx context.Context, tokenHash [
 	return &token, nil
 }
 
-// DeleteByID deletes a specific refresh token by ID.
 func (r *RefreshTokenRepository) DeleteByID(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM refresh_tokens WHERE id = $1`
 
@@ -96,7 +91,6 @@ func (r *RefreshTokenRepository) DeleteByID(ctx context.Context, id uuid.UUID) e
 	return nil
 }
 
-// DeleteExpired removes all expired refresh tokens.
 // Returns the number of tokens deleted.
 func (r *RefreshTokenRepository) DeleteExpired(ctx context.Context) (int64, error) {
 	query := `DELETE FROM refresh_tokens WHERE expires_at <= CURRENT_TIMESTAMP`

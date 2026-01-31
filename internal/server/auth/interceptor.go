@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -81,20 +82,20 @@ func UnaryAuthInterceptorWithBlacklist(jwtManager *JWTManager, blacklist *TokenB
 func extractToken(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", status.Error(codes.Unauthenticated, "missing metadata")
+		return "", status.Error(codes.Unauthenticated, "missing metadata") //nolint:wrapcheck // gRPC status error is the correct format
 	}
 
 	// Try to get token from "authorization" header
 	authHeaders := md.Get("authorization")
 	if len(authHeaders) == 0 {
-		return "", status.Error(codes.Unauthenticated, "missing authorization header")
+		return "", status.Error(codes.Unauthenticated, "missing authorization header") //nolint:wrapcheck // gRPC status error is the correct format
 	}
 
 	// Expected format: "Bearer <token>"
 	authHeader := authHeaders[0]
 	parts := strings.SplitN(authHeader, " ", 2)
 	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		return "", status.Error(codes.Unauthenticated, "invalid authorization header format")
+		return "", status.Error(codes.Unauthenticated, "invalid authorization header format") //nolint:wrapcheck // gRPC status error is the correct format
 	}
 
 	return parts[1], nil
@@ -104,8 +105,9 @@ func extractToken(ctx context.Context) (string, error) {
 func GetUserIDFromContext(ctx context.Context) (string, error) {
 	userID, ok := ctx.Value(UserIDContextKey).(string)
 	if !ok || userID == "" {
-		return "", status.Error(codes.Unauthenticated, "user not authenticated")
+		return "", status.Error(codes.Unauthenticated, "user not authenticated") //nolint:wrapcheck // gRPC status error is the correct format
 	}
+
 	return userID, nil
 }
 
@@ -116,4 +118,20 @@ func GetDeviceIDFromContext(ctx context.Context) string {
 		return ""
 	}
 	return deviceID
+}
+
+// GetUserIDAsUUID extracts and parses the user ID from gRPC context.
+// Returns gRPC status error suitable for handler responses.
+func GetUserIDAsUUID(ctx context.Context) (uuid.UUID, error) {
+	userIDStr, err := GetUserIDFromContext(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return uuid.Nil, status.Errorf(codes.Internal, "invalid user_id in context: %v", err)
+	}
+
+	return userID, nil
 }

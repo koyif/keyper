@@ -3,8 +3,9 @@ package sync
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/koyif/keyper/internal/client/config"
 	"github.com/koyif/keyper/internal/client/session"
@@ -74,7 +75,7 @@ func Sync(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 		if opts.ProgressCallback != nil {
 			opts.ProgressCallback(msg)
 		} else {
-			log.Println(msg)
+			logrus.Info(msg)
 		}
 	}
 
@@ -165,14 +166,14 @@ func Sync(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 	// Get final status
 	finalPending, err := repo.GetPendingSync(ctx)
 	if err != nil {
-		log.Printf("Warning: failed to get final pending count: %v", err)
+		logrus.Warnf("Warning: failed to get final pending count: %v", err)
 	} else {
 		result.FinalPendingCount = len(finalPending)
 	}
 
 	finalConflicts, err := repo.GetUnresolvedConflicts(ctx)
 	if err != nil {
-		log.Printf("Warning: failed to get final conflict count: %v", err)
+		logrus.Warnf("Warning: failed to get final conflict count: %v", err)
 	} else {
 		result.ConflictCount = len(finalConflicts)
 	}
@@ -184,7 +185,7 @@ func Sync(ctx context.Context, cfg *config.Config, sess *session.Session, repo s
 	// Update last sync time
 	syncTimeStr := time.Now().Format(time.RFC3339)
 	if err := UpdateLastSyncAt(cfg, syncTimeStr); err != nil {
-		log.Printf("Warning: failed to update last_sync_at: %v", err)
+		logrus.Warnf("Warning: failed to update last_sync_at: %v", err)
 	}
 	result.LastSyncTime = time.Now()
 
@@ -285,6 +286,6 @@ func InterruptedSyncRecovery(ctx context.Context, repo storage.Repository) error
 		return fmt.Errorf("failed to commit recovery transaction: %w", err)
 	}
 
-	log.Println("Interrupted sync recovery completed successfully")
+	logrus.Info("Interrupted sync recovery completed successfully")
 	return nil
 }

@@ -1,7 +1,9 @@
+//nolint:forbidigo // CLI command requires user output via fmt.Print* for progress and results
 package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,8 +62,8 @@ func newBinaryAddCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 		Long:  "Upload a file as an encrypted binary secret",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			var name, filePath, notes string
@@ -244,26 +246,24 @@ func newBinaryAddCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 			}
 
 			// Store in database
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				if err := repo.Create(ctx, secret); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to store binary secret: %w", err)
+				}
 
-			ctx := context.Background()
-			if err := repo.Create(ctx, secret); err != nil {
-				return fmt.Errorf("failed to store binary secret: %w", err)
-			}
+				logrus.Debugf("Binary secret created: id=%s, name=%s, size=%d", secret.ID, secret.Name, fileSize)
+				fmt.Printf("✓ Binary secret '%s' added successfully\n", name)
+				fmt.Printf("  ID: %s\n", secret.ID)
+				fmt.Printf("  File: %s\n", filename)
+				fmt.Printf("  Size: %.2f MB\n", float64(fileSize)/(1024*1024))
+				fmt.Printf("  Type: %s\n", mimeType)
+				fmt.Printf("  Status: pending sync\n")
 
-			logrus.Debugf("Binary secret created: id=%s, name=%s, size=%d", secret.ID, secret.Name, fileSize)
-			fmt.Printf("✓ Binary secret '%s' added successfully\n", name)
-			fmt.Printf("  ID: %s\n", secret.ID)
-			fmt.Printf("  File: %s\n", filename)
-			fmt.Printf("  Size: %.2f MB\n", float64(fileSize)/(1024*1024))
-			fmt.Printf("  Type: %s\n", mimeType)
-			fmt.Printf("  Status: pending sync\n")
-
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -286,106 +286,99 @@ func newBinaryGetCmd(getCfg func() *config.Config, getSess func() *session.Sessi
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
-
-			ctx := context.Background()
-
-			// Try to get by ID first, then by name
-			var secret *storage.LocalSecret
-			secret, err = repo.Get(ctx, identifier)
-			if err != nil {
-				// Try by name
-				secret, err = repo.GetByName(ctx, identifier)
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Try to get by ID first, then by name
+				var secret *storage.LocalSecret
+				secret, err := repo.Get(ctx, identifier)
 				if err != nil {
-					return fmt.Errorf("binary secret not found: %s", identifier)
+					// Try by name
+					secret, err = repo.GetByName(ctx, identifier)
+					if err != nil {
+						return fmt.Errorf("binary secret not found: %s", identifier)
+					}
 				}
-			}
 
-			// Check if deleted
-			if secret.IsDeleted {
-				return fmt.Errorf("binary secret has been deleted")
-			}
+				// Check if deleted
+				if secret.IsDeleted {
+					return fmt.Errorf("binary secret has been deleted")
+				}
 
-			// Check type
-			if secret.Type != pb.SecretType_SECRET_TYPE_BINARY {
-				return fmt.Errorf("secret is not a binary file (type: %s)", secret.Type)
-			}
+				// Check type
+				if secret.Type != pb.SecretType_SECRET_TYPE_BINARY {
+					return fmt.Errorf("secret is not a binary file (type: %s)", secret.Type)
+				}
 
-			// Decrypt the data
-			fmt.Println("Decrypting file...")
-			encryptionKey := sess.GetEncryptionKey()
-			if encryptionKey == nil {
-				return fmt.Errorf("encryption key not found in session")
-			}
+				// Decrypt the data
+				fmt.Println("Decrypting file...")
+				encryptionKey := sess.GetEncryptionKey()
+				if encryptionKey == nil {
+					return fmt.Errorf("encryption key not found in session")
+				}
 
-			decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
-			if err != nil {
-				return fmt.Errorf("failed to decrypt binary secret: %w", err)
-			}
-
-			// Unmarshal binary data
-			var binaryData pb.BinaryData
-			if err := protojson.Unmarshal(decryptedData, &binaryData); err != nil {
-				return fmt.Errorf("failed to unmarshal binary data: %w", err)
-			}
-
-			// Determine output path
-			var finalOutputPath string
-			if outputPath != "" {
-				// Use specified output path
-				finalOutputPath = filepath.Clean(outputPath)
-			} else if cmd.Flags().Changed("output") && outputPath == "" {
-				// If --output was specified but empty, write to stdout
-				_, err := os.Stdout.Write(binaryData.Data)
+				decryptedData, err := crypto.Decrypt(string(secret.EncryptedData), encryptionKey)
 				if err != nil {
-					return fmt.Errorf("failed to write to stdout: %w", err)
+					return fmt.Errorf("failed to decrypt binary secret: %w", err)
 				}
+
+				// Unmarshal binary data
+				var binaryData pb.BinaryData
+				if err := protojson.Unmarshal(decryptedData, &binaryData); err != nil {
+					return fmt.Errorf("failed to unmarshal binary data: %w", err)
+				}
+
+				// Determine output path
+				var finalOutputPath string
+				if outputPath != "" {
+					// Use specified output path
+					finalOutputPath = filepath.Clean(outputPath)
+				} else if cmd.Flags().Changed("output") && outputPath == "" {
+					// If --output was specified but empty, write to stdout
+					_, err := os.Stdout.Write(binaryData.Data)
+					if err != nil {
+						return fmt.Errorf("failed to write to stdout: %w", err)
+					}
+					return nil
+				} else {
+					// Use original filename in current directory
+					finalOutputPath = filepath.Clean(binaryData.Filename)
+				}
+
+				// Check if file exists
+				if _, err := os.Stat(finalOutputPath); err == nil {
+					var overwrite bool
+					form := huh.NewForm(
+						huh.NewGroup(
+							huh.NewConfirm().
+								Title(fmt.Sprintf("File '%s' already exists. Overwrite?", finalOutputPath)).
+								Value(&overwrite),
+						),
+					)
+
+					if err := form.Run(); err != nil || !overwrite {
+						return fmt.Errorf("download cancelled")
+					}
+				}
+
+				// Write file
+				fmt.Printf("Writing file to %s...\n", finalOutputPath)
+				if err := os.WriteFile(finalOutputPath, binaryData.Data, 0600); err != nil {
+					return fmt.Errorf("failed to write file: %w", err)
+				}
+
+				// Display info
+				fmt.Printf("\n✓ Binary secret '%s' downloaded successfully\n", secret.Name)
+				fmt.Printf("  File: %s\n", finalOutputPath)
+				fmt.Printf("  Size: %.2f MB\n", float64(binaryData.Size)/(1024*1024))
+				fmt.Printf("  Type: %s\n", binaryData.MimeType)
+
 				return nil
-			} else {
-				// Use original filename in current directory
-				finalOutputPath = filepath.Clean(binaryData.Filename)
-			}
-
-			// Check if file exists
-			if _, err := os.Stat(finalOutputPath); err == nil {
-				var overwrite bool
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewConfirm().
-							Title(fmt.Sprintf("File '%s' already exists. Overwrite?", finalOutputPath)).
-							Value(&overwrite),
-					),
-				)
-
-				if err := form.Run(); err != nil || !overwrite {
-					return fmt.Errorf("download cancelled")
-				}
-			}
-
-			// Write file
-			fmt.Printf("Writing file to %s...\n", finalOutputPath)
-			if err := os.WriteFile(finalOutputPath, binaryData.Data, 0600); err != nil {
-				return fmt.Errorf("failed to write file: %w", err)
-			}
-
-			// Display info
-			fmt.Printf("\n✓ Binary secret '%s' downloaded successfully\n", secret.Name)
-			fmt.Printf("  File: %s\n", finalOutputPath)
-			fmt.Printf("  Size: %.2f MB\n", float64(binaryData.Size)/(1024*1024))
-			fmt.Printf("  Type: %s\n", binaryData.MimeType)
-
-			return nil
+			})
 		},
 	}
 
@@ -405,88 +398,85 @@ func newBinaryListCmd(_ func() *config.Config, getSess func() *session.Session, 
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				binType := pb.SecretType_SECRET_TYPE_BINARY
 
-			ctx := context.Background()
-			binType := pb.SecretType_SECRET_TYPE_BINARY
-
-			// List binary secrets
-			secrets, err := repo.List(ctx, storage.ListFilters{
-				Type:           &binType,
-				IncludeDeleted: showDeleted,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to list binary secrets: %w", err)
-			}
-
-			if len(secrets) == 0 {
-				fmt.Println("No binary secrets found")
-				return nil
-			}
-
-			// Display binary secrets
-			fmt.Printf("\nBinary Secrets (%d):\n", len(secrets))
-			fmt.Println(strings.Repeat("-", 100))
-			fmt.Printf("%-10s %-30s %-30s %-15s %s\n", "Status", "ID", "Name", "Size", "Type")
-			fmt.Println(strings.Repeat("-", 100))
-
-			for _, secret := range secrets {
-				status := "✓"
-				if secret.SyncStatus == storage.SyncStatusPending {
-					status = "⏳"
-				} else if secret.SyncStatus == storage.SyncStatusConflict {
-					status = "⚠"
-				}
-				if secret.IsDeleted {
-					status = "🗑"
+				// List binary secrets
+				secrets, err := repo.List(ctx, storage.ListFilters{
+					Type:           &binType,
+					IncludeDeleted: showDeleted,
+				})
+				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to list binary secrets: %w", err)
 				}
 
-				// Try to get file info from metadata
-				mimeType := ""
-				fileSize := ""
-				if secret.Metadata != "" {
-					var metadata pb.Metadata
-					if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
-						if metadata.CustomFields != nil {
-							mimeType = metadata.CustomFields["mime_type"]
-							fileSize = metadata.CustomFields["file_size"]
+				if len(secrets) == 0 {
+					fmt.Println("No binary secrets found")
+					return nil
+				}
+
+				// Display binary secrets
+				fmt.Printf("\nBinary Secrets (%d):\n", len(secrets))
+				fmt.Println(strings.Repeat("-", 100))
+				fmt.Printf("%-10s %-30s %-30s %-15s %s\n", "Status", "ID", "Name", "Size", "Type")
+				fmt.Println(strings.Repeat("-", 100))
+
+				for _, secret := range secrets {
+					status := "✓"
+					if secret.SyncStatus == storage.SyncStatusPending {
+						status = "⏳"
+					} else if secret.SyncStatus == storage.SyncStatusConflict {
+						status = "⚠"
+					}
+					if secret.IsDeleted {
+						status = "🗑"
+					}
+
+					// Try to get file info from metadata
+					mimeType := ""
+					fileSize := ""
+					if secret.Metadata != "" {
+						var metadata pb.Metadata
+						if err := protojson.Unmarshal([]byte(secret.Metadata), &metadata); err == nil {
+							if metadata.CustomFields != nil {
+								mimeType = metadata.CustomFields["mime_type"]
+								fileSize = metadata.CustomFields["file_size"]
+							}
 						}
 					}
+
+					// Format size
+					if fileSize != "" {
+						var sizeBytes int64
+						fmt.Sscanf(fileSize, "%d", &sizeBytes)
+						fileSize = fmt.Sprintf("%.2f MB", float64(sizeBytes)/(1024*1024))
+					}
+
+					displayName := secret.Name
+					if len(displayName) > 28 {
+						displayName = displayName[:25] + "..."
+					}
+
+					displayID := secret.ID
+					if len(displayID) > 28 {
+						displayID = displayID[:8] + "..." + displayID[len(displayID)-8:]
+					}
+
+					fmt.Printf("%-10s %-30s %-30s %-15s %s\n", status, displayID, displayName, fileSize, mimeType)
 				}
 
-				// Format size
-				if fileSize != "" {
-					var sizeBytes int64
-					fmt.Sscanf(fileSize, "%d", &sizeBytes)
-					fileSize = fmt.Sprintf("%.2f MB", float64(sizeBytes)/(1024*1024))
-				}
+				fmt.Println(strings.Repeat("-", 100))
+				fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
 
-				displayName := secret.Name
-				if len(displayName) > 28 {
-					displayName = displayName[:25] + "..."
-				}
-
-				displayID := secret.ID
-				if len(displayID) > 28 {
-					displayID = displayID[:8] + "..." + displayID[len(displayID)-8:]
-				}
-
-				fmt.Printf("%-10s %-30s %-30s %-15s %s\n", status, displayID, displayName, fileSize, mimeType)
-			}
-
-			fmt.Println(strings.Repeat("-", 100))
-			fmt.Println("✓ synced  ⏳ pending  ⚠ conflict  🗑 deleted")
-
-			return nil
+				return nil
+			})
 		},
 	}
 
@@ -507,71 +497,67 @@ func newBinaryDeleteCmd(_ func() *config.Config, getSess func() *session.Session
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sess := getSess()
-			if !sess.IsAuthenticated() {
-				return fmt.Errorf("not logged in. Please run 'keyper auth login' first")
+			if err := requireAuth(sess); err != nil {
+				return err
 			}
 
 			identifier := args[0]
 
-			// Open storage
-			repo, err := getStorage()
-			if err != nil {
-				return fmt.Errorf("failed to open storage: %w", err)
-			}
-			defer repo.Close()
-
-			ctx := context.Background()
-
-			// Get secret to confirm
-			var secret *storage.LocalSecret
-			secret, err = repo.Get(ctx, identifier)
-			if err != nil {
-				secret, err = repo.GetByName(ctx, identifier)
+			return withStorage(getStorage, func(ctx context.Context, repo storage.Repository) error {
+				// Get secret to confirm
+				var secret *storage.LocalSecret
+				secret, err := repo.Get(ctx, identifier)
 				if err != nil {
-					return fmt.Errorf("binary secret not found: %s", identifier)
-				}
-			}
-
-			if secret.IsDeleted {
-				return fmt.Errorf("binary secret already deleted")
-			}
-
-			if secret.Type != pb.SecretType_SECRET_TYPE_BINARY {
-				return fmt.Errorf("secret is not a binary file")
-			}
-
-			// Confirm deletion
-			if !noConfirm {
-				var confirm bool
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewConfirm().
-							Title(fmt.Sprintf("Delete binary secret '%s'?", secret.Name)).
-							Description("This will mark the binary secret as deleted and sync to the server.").
-							Value(&confirm),
-					),
-				)
-
-				if err := form.Run(); err != nil {
-					return fmt.Errorf("operation cancelled: %w", err)
+					secret, err = repo.GetByName(ctx, identifier)
+					if err != nil {
+						return fmt.Errorf("binary secret not found: %s", identifier)
+					}
 				}
 
-				if !confirm {
-					fmt.Println("Deletion cancelled")
-					return nil
+				if secret.IsDeleted {
+					return fmt.Errorf("binary secret already deleted")
 				}
-			}
 
-			// Delete (soft delete)
-			if err := repo.Delete(ctx, secret.ID); err != nil {
-				return fmt.Errorf("failed to delete binary secret: %w", err)
-			}
+				if secret.Type != pb.SecretType_SECRET_TYPE_BINARY {
+					return fmt.Errorf("secret is not a binary file")
+				}
 
-			logrus.Debugf("Binary secret deleted: id=%s, name=%s", secret.ID, secret.Name)
-			fmt.Printf("✓ Binary secret '%s' deleted successfully\n", secret.Name)
-			fmt.Printf("  Status: pending sync\n")
+				// Confirm deletion
+				if !noConfirm {
+					var confirm bool
+					form := huh.NewForm(
+						huh.NewGroup(
+							huh.NewConfirm().
+								Title(fmt.Sprintf("Delete binary secret '%s'?", secret.Name)).
+								Description("This will mark the binary secret as deleted and sync to the server.").
+								Value(&confirm),
+						),
+					)
 
-			return nil
+					if err := form.Run(); err != nil {
+						return fmt.Errorf("operation cancelled: %w", err)
+					}
+
+					if !confirm {
+						fmt.Println("Deletion cancelled")
+						return nil
+					}
+				}
+
+				// Delete (soft delete)
+				if err := repo.Delete(ctx, secret.ID); err != nil {
+					if errors.Is(err, context.DeadlineExceeded) {
+						return fmt.Errorf("database operation timed out after 30s")
+					}
+					return fmt.Errorf("failed to delete binary secret: %w", err)
+				}
+
+				logrus.Debugf("Binary secret deleted: id=%s, name=%s", secret.ID, secret.Name)
+				fmt.Printf("✓ Binary secret '%s' deleted successfully\n", secret.Name)
+				fmt.Printf("  Status: pending sync\n")
+
+				return nil
+			})
 		},
 	}
 
