@@ -82,6 +82,12 @@ jobs:
 
       - name: Run tests
         env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: keyper
+          POSTGRES_PASSWORD: keyper_test_password
+          POSTGRES_DB: keyper_test
+          POSTGRES_SSL_MODE: disable
           TEST_POSTGRES_HOST: localhost
           TEST_POSTGRES_PORT: 5432
           TEST_POSTGRES_USER: keyper
