@@ -38,9 +38,12 @@ func init() {
 	}
 }
 
-// testConfig returns a standard test database configuration.
+// testConfig returns a copy of the standard test database configuration.
+// Returns a copy to avoid tests mutating shared state.
 func testConfig() *Config {
-	return testCfg
+	// Return a copy to avoid tests mutating the global config
+	cfg := *testCfg
+	return &cfg
 }
 
 func getEnvOrDefault(key, defaultValue string) string {
