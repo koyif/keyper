@@ -21,7 +21,7 @@ import (
 // UserRepository defines the interface for user data access.
 // Interfaces are defined at the point of use following Go best practices.
 type UserRepository interface {
-	CreateUser(ctx context.Context, username string, passwordHash, encryptionKeyVerifier, salt []byte) (*repository.User, error)
+	CreateUser(ctx context.Context, params repository.CreateUserParams) (*repository.User, error)
 	GetUserByEmail(ctx context.Context, email string) (*repository.User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (*repository.User, error)
 	Update(ctx context.Context, user *repository.User) error
@@ -86,7 +86,12 @@ func (s *AuthService) Register(ctx context.Context, req *pb.RegisterRequest) (*p
 		return nil, status.Errorf(codes.Internal, "failed to decode verifier: %v", err)
 	}
 
-	user, err := s.userRepo.CreateUser(ctx, req.Username, passwordHash, verifierBytes, salt)
+	user, err := s.userRepo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 req.Username,
+		PasswordHash:          passwordHash,
+		EncryptionKeyVerifier: verifierBytes,
+		Salt:                  salt,
+	})
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicate) {
 			return nil, status.Error(codes.AlreadyExists, "user with this username already exists") //nolint:wrapcheck // gRPC status errors should not be wrapped

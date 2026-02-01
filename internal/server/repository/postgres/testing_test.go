@@ -107,7 +107,12 @@ func createTestUser(t *testing.T, ctx context.Context, repo *UserRepository) *re
 	t.Helper()
 
 	email := uuid.New().String() + "@example.com"
-	user, err := repo.CreateUser(ctx, email, []byte("hash"), []byte("verifier"), []byte("salt"))
+	user, err := repo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 email,
+		PasswordHash:          []byte("hash"),
+		EncryptionKeyVerifier: []byte("verifier"),
+		Salt:                  []byte("salt"),
+	})
 	if err != nil {
 		t.Fatalf("failed to create test user: %v", err)
 	}

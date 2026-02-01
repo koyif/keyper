@@ -18,7 +18,7 @@ import (
 //
 //nolint:unused // example interface for documentation
 type authUserRepository interface {
-	CreateUser(ctx context.Context, email string, passwordHash, encryptionKeyVerifier, salt []byte) (*User, error)
+	CreateUser(ctx context.Context, params CreateUserParams) (*User, error)
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
 }
 

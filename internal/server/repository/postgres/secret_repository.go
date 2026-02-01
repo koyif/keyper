@@ -51,19 +51,19 @@ func scanSecret(scanner interface {
 }
 
 func (r *SecretRepository) Create(ctx context.Context, secret *repository.Secret) (*repository.Secret, error) {
+	// Build the query dynamically based on whether ID is provided
+	hasID := secret.ID != uuid.Nil
+
 	var (
-		query string
-		args  []any
+		columns   string
+		values    string
+		args      []any
+		returning string
 	)
 
-	// If ID is provided (not zero value), use it. Otherwise let database generate it.
-
-	if secret.ID != uuid.Nil {
-		query = `
-			INSERT INTO secrets (id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 1, false)
-			RETURNING id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted, created_at, updated_at
-		`
+	if hasID {
+		columns = "id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted"
+		values = "$1, $2, $3, $4, $5, $6, $7, 1, false"
 		args = []any{
 			secret.ID,
 			secret.UserID,
@@ -73,12 +73,10 @@ func (r *SecretRepository) Create(ctx context.Context, secret *repository.Secret
 			secret.Nonce,
 			secret.Metadata,
 		}
+		returning = "created_at, updated_at"
 	} else {
-		query = `
-			INSERT INTO secrets (user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted)
-			VALUES ($1, $2, $3, $4, $5, $6, 1, false)
-			RETURNING id, user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted, created_at, updated_at
-		`
+		columns = "user_id, name, type, encrypted_data, nonce, metadata, version, is_deleted"
+		values = "$1, $2, $3, $4, $5, $6, 1, false"
 		args = []any{
 			secret.UserID,
 			secret.Name,
@@ -87,13 +85,38 @@ func (r *SecretRepository) Create(ctx context.Context, secret *repository.Secret
 			secret.Nonce,
 			secret.Metadata,
 		}
+		returning = "id, created_at, updated_at"
 	}
+
+	query := fmt.Sprintf(
+		"INSERT INTO secrets (%s) VALUES (%s) RETURNING %s",
+		columns, values, returning,
+	)
 
 	q := getQuerier(ctx, r.pool)
 
-	result, err := scanSecret(q.QueryRow(ctx, query, args...))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create secret: %w", err)
+	result := &repository.Secret{
+		ID:            secret.ID,
+		UserID:        secret.UserID,
+		Name:          secret.Name,
+		Type:          secret.Type,
+		EncryptedData: secret.EncryptedData,
+		Nonce:         secret.Nonce,
+		Metadata:      secret.Metadata,
+		Version:       1,
+		IsDeleted:     false,
+	}
+
+	if hasID {
+		err := q.QueryRow(ctx, query, args...).Scan(&result.CreatedAt, &result.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create secret: %w", err)
+		}
+	} else {
+		err := q.QueryRow(ctx, query, args...).Scan(&result.ID, &result.CreatedAt, &result.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create secret: %w", err)
+		}
 	}
 
 	return result, nil

@@ -25,7 +25,12 @@ func TestTransactor_WithTransaction_Success(t *testing.T) {
 
 	err := transactor.WithTransaction(ctx, func(txCtx context.Context) error {
 		// Create user within transaction
-		user, err := userRepo.CreateUser(txCtx, "tx@example.com", []byte("hash"), []byte("verifier"), []byte("salt"))
+		user, err := userRepo.CreateUser(txCtx, repository.CreateUserParams{
+			Email:                 "tx@example.com",
+			PasswordHash:          []byte("hash"),
+			EncryptionKeyVerifier: []byte("verifier"),
+			Salt:                  []byte("salt"),
+		})
 		if err != nil {
 			return err
 		}
@@ -70,7 +75,12 @@ func TestTransactor_WithTransaction_Rollback(t *testing.T) {
 
 	err := transactor.WithTransaction(ctx, func(txCtx context.Context) error {
 		// Create user within transaction
-		user, err := userRepo.CreateUser(txCtx, email, []byte("hash"), []byte("verifier"), []byte("salt"))
+		user, err := userRepo.CreateUser(txCtx, repository.CreateUserParams{
+			Email:                 email,
+			PasswordHash:          []byte("hash"),
+			EncryptionKeyVerifier: []byte("verifier"),
+			Salt:                  []byte("salt"),
+		})
 		if err != nil {
 			return err
 		}
@@ -126,7 +136,12 @@ func TestTransactor_WithTransaction_Panic(t *testing.T) {
 	//nolint:errcheck // intentional - testing panic recovery
 	_ = transactor.WithTransaction(ctx, func(txCtx context.Context) error {
 		// Create user
-		_, err := userRepo.CreateUser(txCtx, email, []byte("hash"), []byte("verifier"), []byte("salt"))
+		_, err := userRepo.CreateUser(txCtx, repository.CreateUserParams{
+			Email:                 email,
+			PasswordHash:          []byte("hash"),
+			EncryptionKeyVerifier: []byte("verifier"),
+			Salt:                  []byte("salt"),
+		})
 		if err != nil {
 			return err
 		}
@@ -148,7 +163,12 @@ func TestTransactor_WithTransaction_Nested(t *testing.T) {
 
 	err := transactor.WithTransaction(ctx, func(txCtx context.Context) error {
 		// Create user in outer transaction
-		_, err := userRepo.CreateUser(txCtx, email, []byte("hash"), []byte("verifier"), []byte("salt"))
+		_, err := userRepo.CreateUser(txCtx, repository.CreateUserParams{
+			Email:                 email,
+			PasswordHash:          []byte("hash"),
+			EncryptionKeyVerifier: []byte("verifier"),
+			Salt:                  []byte("salt"),
+		})
 		if err != nil {
 			return err
 		}
@@ -186,7 +206,12 @@ func TestTransactor_WithTransaction_NestedRollback(t *testing.T) {
 
 	err := transactor.WithTransaction(ctx, func(txCtx context.Context) error {
 		// Create user in outer transaction
-		_, err := userRepo.CreateUser(txCtx, email, []byte("hash"), []byte("verifier"), []byte("salt"))
+		_, err := userRepo.CreateUser(txCtx, repository.CreateUserParams{
+			Email:                 email,
+			PasswordHash:          []byte("hash"),
+			EncryptionKeyVerifier: []byte("verifier"),
+			Salt:                  []byte("salt"),
+		})
 		if err != nil {
 			return err
 		}

@@ -24,7 +24,12 @@ func TestSecretRepository_Search(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test user
-	testUser, err := userRepo.CreateUser(ctx, "search-test@example.com", []byte("hash"), []byte("verifier"), []byte("salt"))
+	testUser, err := userRepo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 "search-test@example.com",
+		PasswordHash:          []byte("hash"),
+		EncryptionKeyVerifier: []byte("verifier"),
+		Salt:                  []byte("salt"),
+	})
 	require.NoError(t, err)
 	userID := testUser.ID
 

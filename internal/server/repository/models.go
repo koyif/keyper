@@ -17,6 +17,14 @@ type User struct {
 	UpdatedAt             time.Time
 }
 
+// CreateUserParams holds the parameters for creating a new user.
+type CreateUserParams struct {
+	Email                 string
+	PasswordHash          []byte
+	EncryptionKeyVerifier []byte
+	Salt                  []byte
+}
+
 // Secret represents an encrypted secret entity in the database.
 type Secret struct {
 	ID            uuid.UUID

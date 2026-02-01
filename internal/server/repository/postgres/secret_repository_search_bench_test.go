@@ -21,7 +21,12 @@ func BenchmarkSecretRepository_Search(b *testing.B) {
 	ctx := context.Background()
 
 	// Create test user
-	testUser, err := userRepo.CreateUser(ctx, "bench-test@example.com", []byte("hash"), []byte("verifier"), []byte("salt"))
+	testUser, err := userRepo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 "bench-test@example.com",
+		PasswordHash:          []byte("hash"),
+		EncryptionKeyVerifier: []byte("verifier"),
+		Salt:                  []byte("salt"),
+	})
 	if err != nil {
 		b.Fatalf("Failed to create test user: %v", err)
 	}
@@ -165,7 +170,12 @@ func BenchmarkSecretRepository_Search_Pagination(b *testing.B) {
 	userRepo := NewUserRepository(pool)
 	ctx := context.Background()
 
-	testUser, err := userRepo.CreateUser(ctx, "bench-pagination@example.com", []byte("hash"), []byte("verifier"), []byte("salt"))
+	testUser, err := userRepo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 "bench-pagination@example.com",
+		PasswordHash:          []byte("hash"),
+		EncryptionKeyVerifier: []byte("verifier"),
+		Salt:                  []byte("salt"),
+	})
 	if err != nil {
 		b.Fatalf("Failed to create test user: %v", err)
 	}
@@ -220,7 +230,12 @@ func BenchmarkSecretRepository_Search_vs_ListByUser(b *testing.B) {
 	userRepo := NewUserRepository(pool)
 	ctx := context.Background()
 
-	testUser, err := userRepo.CreateUser(ctx, "bench-comparison@example.com", []byte("hash"), []byte("verifier"), []byte("salt"))
+	testUser, err := userRepo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 "bench-comparison@example.com",
+		PasswordHash:          []byte("hash"),
+		EncryptionKeyVerifier: []byte("verifier"),
+		Salt:                  []byte("salt"),
+	})
 	if err != nil {
 		b.Fatalf("Failed to create test user: %v", err)
 	}

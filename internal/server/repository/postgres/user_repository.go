@@ -23,7 +23,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	}
 }
 
-func (r *UserRepository) CreateUser(ctx context.Context, email string, passwordHash, encryptionKeyVerifier, salt []byte) (*repository.User, error) {
+func (r *UserRepository) CreateUser(ctx context.Context, params repository.CreateUserParams) (*repository.User, error) {
 	query := `
 		INSERT INTO users (email, password_hash, encryption_key_verifier, salt)
 		VALUES ($1, $2, $3, $4)
@@ -34,7 +34,7 @@ func (r *UserRepository) CreateUser(ctx context.Context, email string, passwordH
 
 	var user repository.User
 
-	err := q.QueryRow(ctx, query, email, passwordHash, encryptionKeyVerifier, salt).Scan(
+	err := q.QueryRow(ctx, query, params.Email, params.PasswordHash, params.EncryptionKeyVerifier, params.Salt).Scan(
 		&user.ID,
 		&user.Email,
 		&user.PasswordHash,
@@ -47,7 +47,7 @@ func (r *UserRepository) CreateUser(ctx context.Context, email string, passwordH
 		// Check for unique constraint violation
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return nil, fmt.Errorf("user with email %s: %w", email, repository.ErrDuplicate)
+			return nil, fmt.Errorf("user with email %s: %w", params.Email, repository.ErrDuplicate)
 		}
 
 		return nil, fmt.Errorf("failed to create user: %w", err)

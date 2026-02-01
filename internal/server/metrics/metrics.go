@@ -8,6 +8,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// maxDurationEntriesPerMethod is the maximum number of duration entries to keep per method.
+	maxDurationEntriesPerMethod = 1000
+)
+
 // Metrics holds application metrics.
 type Metrics struct {
 	mu sync.RWMutex
@@ -48,8 +53,8 @@ func (m *Metrics) RecordRequestDuration(method string, duration time.Duration) {
 
 	m.requestDurations[method] = append(m.requestDurations[method], duration)
 
-	// Keep only last 1000 entries per method
-	if len(m.requestDurations[method]) > 1000 {
+	// Keep only last maxDurationEntriesPerMethod entries per method
+	if len(m.requestDurations[method]) > maxDurationEntriesPerMethod {
 		m.requestDurations[method] = m.requestDurations[method][1:]
 	}
 }

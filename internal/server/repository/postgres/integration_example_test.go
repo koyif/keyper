@@ -38,7 +38,12 @@ func TestUserRepositoryIntegration(t *testing.T) {
 		salt := []byte("random_salt_bytes")
 
 		// Create user.
-		user, err := repo.CreateUser(ctx, email, passwordHash, keyVerifier, salt)
+		user, err := repo.CreateUser(ctx, repository.CreateUserParams{
+			Email:                 email,
+			PasswordHash:          passwordHash,
+			EncryptionKeyVerifier: keyVerifier,
+			Salt:                  salt,
+		})
 		require.NoError(t, err, "should create user successfully")
 		assert.NotEmpty(t, user.ID, "user ID should be generated")
 		assert.Equal(t, email, user.Email)
@@ -68,11 +73,21 @@ func TestUserRepositoryIntegration(t *testing.T) {
 		email := "duplicate@example.com"
 
 		// Create first user.
-		_, err := repo.CreateUser(ctx, email, []byte("hash1"), []byte("verifier1"), []byte("salt1"))
+		_, err := repo.CreateUser(ctx, repository.CreateUserParams{
+			Email:                 email,
+			PasswordHash:          []byte("hash1"),
+			EncryptionKeyVerifier: []byte("verifier1"),
+			Salt:                  []byte("salt1"),
+		})
 		require.NoError(t, err, "first user creation should succeed")
 
 		// Attempt to create user with same email.
-		_, err = repo.CreateUser(ctx, email, []byte("hash2"), []byte("verifier2"), []byte("salt2"))
+		_, err = repo.CreateUser(ctx, repository.CreateUserParams{
+			Email:                 email,
+			PasswordHash:          []byte("hash2"),
+			EncryptionKeyVerifier: []byte("verifier2"),
+			Salt:                  []byte("salt2"),
+		})
 		assert.Error(t, err, "should fail to create user with duplicate email")
 		assert.ErrorIs(t, err, repository.ErrDuplicate, "error should be ErrDuplicate")
 	})

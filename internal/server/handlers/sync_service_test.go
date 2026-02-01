@@ -642,7 +642,12 @@ func createTestUser(ctx context.Context, t *testing.T, repo *postgres.UserReposi
 	t.Helper()
 
 	email := uuid.New().String() + "@example.com"
-	user, err := repo.CreateUser(ctx, email, []byte("hash"), []byte("verifier"), []byte("salt"))
+	user, err := repo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 email,
+		PasswordHash:          []byte("hash"),
+		EncryptionKeyVerifier: []byte("verifier"),
+		Salt:                  []byte("salt"),
+	})
 	require.NoError(t, err)
 
 	return user

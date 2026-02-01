@@ -23,7 +23,12 @@ func TestUserRepository_CreateUser(t *testing.T) {
 	encryptionKeyVerifier := []byte("verifier")
 	salt := []byte("salt")
 
-	user, err := repo.CreateUser(ctx, email, passwordHash, encryptionKeyVerifier, salt)
+	user, err := repo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 email,
+		PasswordHash:          passwordHash,
+		EncryptionKeyVerifier: encryptionKeyVerifier,
+		Salt:                  salt,
+	})
 	require.NoError(t, err)
 	require.NotNil(t, user)
 
@@ -49,11 +54,21 @@ func TestUserRepository_CreateUser_DuplicateEmail(t *testing.T) {
 	salt := []byte("salt")
 
 	// Create first user
-	_, err := repo.CreateUser(ctx, email, passwordHash, encryptionKeyVerifier, salt)
+	_, err := repo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 email,
+		PasswordHash:          passwordHash,
+		EncryptionKeyVerifier: encryptionKeyVerifier,
+		Salt:                  salt,
+	})
 	require.NoError(t, err)
 
 	// Attempt to create duplicate
-	_, err = repo.CreateUser(ctx, email, passwordHash, encryptionKeyVerifier, salt)
+	_, err = repo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 email,
+		PasswordHash:          passwordHash,
+		EncryptionKeyVerifier: encryptionKeyVerifier,
+		Salt:                  salt,
+	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, repository.ErrDuplicate)
 }
@@ -71,7 +86,12 @@ func TestUserRepository_GetUserByEmail(t *testing.T) {
 	encryptionKeyVerifier := []byte("verifier")
 	salt := []byte("salt")
 
-	created, err := repo.CreateUser(ctx, email, passwordHash, encryptionKeyVerifier, salt)
+	created, err := repo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 email,
+		PasswordHash:          passwordHash,
+		EncryptionKeyVerifier: encryptionKeyVerifier,
+		Salt:                  salt,
+	})
 	require.NoError(t, err)
 
 	// Retrieve by email
@@ -109,7 +129,12 @@ func TestUserRepository_GetUserByID(t *testing.T) {
 	encryptionKeyVerifier := []byte("verifier")
 	salt := []byte("salt")
 
-	created, err := repo.CreateUser(ctx, email, passwordHash, encryptionKeyVerifier, salt)
+	created, err := repo.CreateUser(ctx, repository.CreateUserParams{
+		Email:                 email,
+		PasswordHash:          passwordHash,
+		EncryptionKeyVerifier: encryptionKeyVerifier,
+		Salt:                  salt,
+	})
 	require.NoError(t, err)
 
 	// Retrieve by ID
