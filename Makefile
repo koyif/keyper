@@ -38,7 +38,9 @@ DB_PASSWORD := keyper_dev_password
 DB_NAME := keyper
 DB_SSL_MODE := disable
 MIGRATIONS_DIR := migrations
-DATABASE_URL := postgresql://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSL_MODE)
+ifndef DATABASE_URL
+	DATABASE_URL := postgresql://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=$(DB_SSL_MODE)
+endif
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
