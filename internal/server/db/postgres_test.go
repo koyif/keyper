@@ -69,9 +69,10 @@ func TestNewPool_Success(t *testing.T) {
 
 func TestNewPool_DefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.User = "keyper"
-	cfg.Password = "keyper_dev_password"
-	cfg.Database = "keyper_test"
+	// Use test credentials from environment
+	cfg.User = testCfg.User
+	cfg.Password = testCfg.Password
+	cfg.Database = testCfg.Database
 	cfg.SkipMigrations = true
 
 	ctx := context.Background()
