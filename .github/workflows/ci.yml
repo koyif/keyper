@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+          args: --timeout=5m
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: keyper
+          POSTGRES_PASSWORD: keyper_test_password
+          POSTGRES_DB: keyper_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install dependencies
+        run: |
+          go mod download
+          go mod verify
+
+      - name: Install golang-migrate
+        run: |
+          curl -L https://github.com/golang-migrate/migrate/releases/download/v4.19.1/migrate.linux-amd64.tar.gz | tar xvz
+          sudo mv migrate /usr/local/bin/migrate
+          migrate -version
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: "postgresql://keyper:keyper_test_password@localhost:5432/keyper_test?sslmode=disable"
+        run: |
+          make migrate-up
+
+      - name: Run tests
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: keyper
+          POSTGRES_PASSWORD: keyper_test_password
+          POSTGRES_DB: keyper_test
+          POSTGRES_SSL_MODE: disable
+          TEST_POSTGRES_HOST: localhost
+          TEST_POSTGRES_PORT: 5432
+          TEST_POSTGRES_USER: keyper
+          TEST_POSTGRES_PASSWORD: keyper_test_password
+          TEST_POSTGRES_DB: keyper_test
+          TEST_POSTGRES_SSL_MODE: disable
+        run: |
+          # Run tests excluding packages without tests and generated code
+          go test -v -race -coverprofile=coverage.out -covermode=atomic \
+            $(go list ./... | grep -v -E '(cmd/|/tui$|/grpcutil$|/metrics$|/config$|pkg/api/proto|internal/database$)')
+
+      - name: Check coverage threshold
+        run: |
+          # Exclude generated proto files from coverage report
+          go tool cover -func=coverage.out | grep -v "\.pb\.go" | grep -v "\.pb\.gw\.go" > coverage_filtered.txt
+
+          COVERAGE=$(grep total coverage_filtered.txt | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage (excluding generated code and untested packages): ${COVERAGE}%"
+
+          THRESHOLD=45
+          if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+            echo "Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
+            exit 1
+          fi
+          echo "Coverage ${COVERAGE}% meets threshold ${THRESHOLD}%"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-keyper
+          fail_ci_if_error: false
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install protoc
+        run: |
+          PROTOC_VERSION=25.1
+          curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip
+          sudo unzip protoc-${PROTOC_VERSION}-linux-x86_64.zip -d /usr/local
+          protoc --version
+
+      - name: Install protoc plugins
+        run: make install-tools
+
+      - name: Generate proto files
+        run: make proto
+
+      - name: Build binaries
+        run: make build
+
+      - name: Test binaries
+        run: |
+          ./bin/keyper-client version
+          ./bin/keyper-server -version
+
+      - name: Upload client binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyper-client-linux-amd64
+          path: bin/keyper-client
+          retention-days: 7
+
+      - name: Upload server binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyper-server-linux-amd64
+          path: bin/keyper-server
+          retention-days: 7

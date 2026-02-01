@@ -1,0 +1,428 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Keyper API",
+    "description": "End-to-end encrypted password manager API\n\n## Overview\nKeyper is a secure password manager with client-side encryption. All secrets are encrypted using AES-256-GCM before being sent to the server, ensuring that the server never has access to plaintext data.\n\n## Authentication\nMost endpoints require authentication. After logging in or registering, include the access token in the Authorization header:\n\n```\nAuthorization: Bearer \u003caccess_token\u003e\n```\n\nAccess tokens expire after 15 minutes. Use the refresh token endpoint to obtain a new access token without requiring the user to log in again.\n\n## Encryption\n- **Master Password**: Never sent to server, used to derive two keys:\n  - Authentication Hash: Argon2id-derived, sent to server for authentication\n  - Encryption Key: Derived locally, used for AES-256-GCM encryption\n- **Secret Data**: All secret data is encrypted client-side before upload\n- **Zero-Knowledge**: Server stores only encrypted blobs\n\n## Offline-First Sync\nKeyper supports offline-first operation with automatic conflict resolution:\n- Clients can work without network connectivity\n- Changes sync automatically when connection is restored\n- Version vectors detect and resolve conflicts\n",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Keyper API Support",
+      "url": "https://github.com/koyif/keyper"
+    },
+    "license": {
+      "name": "MIT License",
+      "url": "https://opensource.org/licenses/MIT"
+    }
+  },
+  "tags": [
+    {
+      "name": "AuthService",
+      "description": "User authentication and session management endpoints. Register and login do not require authentication. All other endpoints require a valid access token in the Authorization header."
+    }
+  ],
+  "schemes": [
+    "https",
+    "http"
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/auth/change-password": {
+      "post": {
+        "summary": "ChangePassword allows authenticated users to change their password.",
+        "description": "This endpoint requires authentication. Changing the password requires re-encryption\nof all secrets with the new encryption key. This operation happens on the client side.\nNew tokens are issued after password change since the authentication hash changes.",
+        "operationId": "AuthService_ChangePassword",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ChangePasswordResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "ChangePasswordRequest contains old and new passwords.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1ChangePasswordRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "summary": "Login authenticates a user and returns access/refresh tokens.",
+        "description": "Validates the username and derived password hash, then issues JWT tokens.\nThe access token should be included in the Authorization header as \"Bearer \u003ctoken\u003e\"\nfor all subsequent authenticated requests.\n\nAccess tokens expire after 15 minutes, refresh tokens after 30 days.",
+        "operationId": "AuthService_Login",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1LoginResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "LoginRequest contains user login credentials.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1LoginRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "summary": "Logout revokes the current refresh token.",
+        "description": "This endpoint requires authentication. It invalidates the provided refresh token\nand adds the current access token to a blacklist, effectively logging out the user.\nThe client should clear all local session data after logout.",
+        "operationId": "AuthService_Logout",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1LogoutResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "LogoutRequest contains the refresh token to revoke.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1LogoutRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/auth/refresh": {
+      "post": {
+        "summary": "RefreshToken generates a new access token using a refresh token.",
+        "description": "When an access token expires, use this endpoint with a valid refresh token\nto obtain a new access token without requiring the user to log in again.\nThe refresh token itself is not rotated.",
+        "operationId": "AuthService_RefreshToken",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1RefreshTokenResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "RefreshTokenRequest contains the refresh token.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1RefreshTokenRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/auth/register": {
+      "post": {
+        "summary": "Register creates a new user account.",
+        "description": "This endpoint creates a new user with a unique username and derives authentication\ncredentials from the provided master password. The master password is used to derive\ntwo separate keys on the client: one for authentication and one for encryption.\nOnly the authentication hash is sent to the server.\n\nReturns JWT access token (15 min expiry) and refresh token (30 day expiry).",
+        "operationId": "AuthService_Register",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1RegisterResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "RegisterRequest contains user registration information.",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1RegisterRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1ChangePasswordRequest": {
+      "type": "object",
+      "properties": {
+        "oldPassword": {
+          "type": "string",
+          "title": "Current Argon2id-derived authentication hash"
+        },
+        "newPassword": {
+          "type": "string",
+          "title": "New Argon2id-derived authentication hash"
+        }
+      },
+      "description": "ChangePasswordRequest contains old and new passwords."
+    },
+    "v1ChangePasswordResponse": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "title": "Human-readable confirmation message"
+        },
+        "accessToken": {
+          "type": "string",
+          "title": "New JWT access token (15 minute expiry) - old tokens are invalidated"
+        },
+        "refreshToken": {
+          "type": "string",
+          "title": "New refresh token (30 day expiry)"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "New access token expiration timestamp"
+        }
+      },
+      "description": "ChangePasswordResponse confirms password change."
+    },
+    "v1LoginRequest": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "title": "Username for the account"
+        },
+        "masterPassword": {
+          "type": "string",
+          "title": "Argon2id-derived authentication hash (never the raw password)"
+        },
+        "deviceInfo": {
+          "type": "string",
+          "title": "Optional device information for session tracking (e.g., \"Chrome on macOS\")"
+        }
+      },
+      "description": "LoginRequest contains user login credentials."
+    },
+    "v1LoginResponse": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "title": "Unique user identifier (UUID)"
+        },
+        "accessToken": {
+          "type": "string",
+          "title": "JWT access token (15 minute expiry) - use in Authorization header as \"Bearer \u003ctoken\u003e\""
+        },
+        "refreshToken": {
+          "type": "string",
+          "title": "Refresh token (30 day expiry) - use to obtain new access tokens"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "Access token expiration timestamp"
+        },
+        "message": {
+          "type": "string",
+          "title": "Human-readable success message"
+        }
+      },
+      "description": "LoginResponse contains authentication tokens."
+    },
+    "v1LogoutRequest": {
+      "type": "object",
+      "properties": {
+        "refreshToken": {
+          "type": "string",
+          "title": "Refresh token to invalidate"
+        }
+      },
+      "description": "LogoutRequest contains the refresh token to revoke."
+    },
+    "v1LogoutResponse": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "title": "Human-readable confirmation message"
+        }
+      },
+      "description": "LogoutResponse confirms logout."
+    },
+    "v1RefreshTokenRequest": {
+      "type": "object",
+      "properties": {
+        "refreshToken": {
+          "type": "string",
+          "title": "Valid refresh token obtained from login or registration"
+        }
+      },
+      "description": "RefreshTokenRequest contains the refresh token."
+    },
+    "v1RefreshTokenResponse": {
+      "type": "object",
+      "properties": {
+        "accessToken": {
+          "type": "string",
+          "title": "New JWT access token (15 minute expiry)"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "New access token expiration timestamp"
+        },
+        "message": {
+          "type": "string",
+          "title": "Human-readable success message"
+        }
+      },
+      "description": "RefreshTokenResponse contains a new access token."
+    },
+    "v1RegisterRequest": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string",
+          "title": "Unique username for the account (3-50 characters, alphanumeric and underscore only)"
+        },
+        "masterPassword": {
+          "type": "string",
+          "title": "Argon2id-derived authentication hash (never the raw password)"
+        },
+        "deviceInfo": {
+          "type": "string",
+          "title": "Optional device information for session tracking (e.g., \"Chrome on macOS\")"
+        }
+      },
+      "description": "RegisterRequest contains user registration information."
+    },
+    "v1RegisterResponse": {
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "title": "Unique user identifier (UUID)"
+        },
+        "accessToken": {
+          "type": "string",
+          "title": "JWT access token (15 minute expiry) - use in Authorization header as \"Bearer \u003ctoken\u003e\""
+        },
+        "refreshToken": {
+          "type": "string",
+          "title": "Refresh token (30 day expiry) - use to obtain new access tokens"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "Access token expiration timestamp"
+        },
+        "message": {
+          "type": "string",
+          "title": "Human-readable success message"
+        }
+      },
+      "description": "RegisterResponse contains registration result."
+    }
+  },
+  "securityDefinitions": {
+    "Bearer": {
+      "type": "apiKey",
+      "description": "Enter your access token in the format: Bearer \u003ctoken\u003e",
+      "name": "Authorization",
+      "in": "header"
+    }
+  },
+  "security": [
+    {
+      "Bearer": []
+    }
+  ]
+}

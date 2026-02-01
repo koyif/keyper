@@ -1,0 +1,127 @@
+package database
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/golang-migrate/migrate/v4"
+	"github.com/golang-migrate/migrate/v4/database/postgres"
+	_ "github.com/golang-migrate/migrate/v4/source/file"
+	_ "github.com/lib/pq"
+	"github.com/sirupsen/logrus"
+)
+
+// Config holds database configuration
+type Config struct {
+	Host     string
+	Port     int
+	User     string
+	Password string
+	Database string
+	SSLMode  string
+}
+
+// DB wraps the sql.DB with additional functionality
+type DB struct {
+	*sql.DB
+	config Config
+}
+
+// New creates a new database connection and runs migrations
+func New(cfg Config) (*DB, error) {
+	connStr := fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode,
+	)
+
+	sqlDB, err := sql.Open("postgres", connStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	sqlDB.SetConnMaxIdleTime(1 * time.Minute)
+
+	if err := sqlDB.PingContext(context.Background()); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	db := &DB{
+		DB:     sqlDB,
+		config: cfg,
+	}
+
+	if err := db.runMigrations(); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	return db, nil
+}
+
+// runMigrations executes database migrations
+func (db *DB) runMigrations() error {
+	driver, err := postgres.WithInstance(db.DB, &postgres.Config{})
+	if err != nil {
+		return fmt.Errorf("failed to create migration driver: %w", err)
+	}
+
+	// Migrations are expected to be in the migrations/ directory
+	m, err := migrate.NewWithDatabaseInstance(
+		"file://migrations",
+		"postgres",
+		driver,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create migrate instance: %w", err)
+	}
+	defer m.Close()
+
+	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	version, dirty, err := m.Version()
+	if err != nil && !errors.Is(err, migrate.ErrNilVersion) {
+		return fmt.Errorf("failed to get migration version: %w", err)
+	}
+
+	if dirty {
+		return fmt.Errorf("database is in dirty state at version %d", version)
+	}
+
+	if errors.Is(err, migrate.ErrNilVersion) {
+		logrus.Info("Database migrations completed successfully (no migrations found)")
+	} else {
+		logrus.Infof("Database migrations completed successfully (version: %d)", version)
+	}
+
+	return nil
+}
+
+// Close closes the database connection
+func (db *DB) Close() error {
+	if err := db.DB.Close(); err != nil {
+		return fmt.Errorf("failed to close database: %w", err)
+	}
+
+	return nil
+}
+
+// Health checks if the database connection is healthy
+func (db *DB) Health() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(ctx); err != nil {
+		return fmt.Errorf("database health check failed: %w", err)
+	}
+
+	return nil
+}

@@ -1,0 +1,25 @@
+name: Lint
+
+on:
+  push:
+    branches: [main, develop, impl10]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  golangci-lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.8
+          args: --config .golangci.yml --timeout 5m
