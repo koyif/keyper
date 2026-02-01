@@ -2,6 +2,8 @@ package db
 
 import (
 	"context"
+	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -9,15 +11,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testConfig returns a standard test database configuration.
-func testConfig() *Config {
-	return &Config{
-		Host:              "localhost",
-		Port:              5432,
-		User:              "keyper",
-		Password:          "keyper_dev_password",
-		Database:          "keyper_test",
-		SSLMode:           "disable",
+var testCfg *Config
+
+func init() {
+	host := getEnvOrDefault("TEST_POSTGRES_HOST", "localhost")
+	port := getEnvOrDefault("TEST_POSTGRES_PORT", "5432")
+	user := getEnvOrDefault("TEST_POSTGRES_USER", "keyper")
+	password := getEnvOrDefault("TEST_POSTGRES_PASSWORD", "keyper_dev_password")
+	database := getEnvOrDefault("TEST_POSTGRES_DB", "keyper_test")
+	sslMode := getEnvOrDefault("TEST_POSTGRES_SSL_MODE", "disable")
+	portNum, _ := strconv.Atoi(port)
+
+	testCfg = &Config{
+		Host:              host,
+		Port:              portNum,
+		User:              user,
+		Password:          password,
+		Database:          database,
+		SSLMode:           sslMode,
 		MaxConns:          5,
 		MinConns:          1,
 		MaxConnLifetime:   time.Hour,
@@ -25,6 +36,18 @@ func testConfig() *Config {
 		HealthCheckPeriod: time.Minute,
 		SkipMigrations:    true,
 	}
+}
+
+// testConfig returns a standard test database configuration.
+func testConfig() *Config {
+	return testCfg
+}
+
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }
 
 func TestNewPool_Success(t *testing.T) {
